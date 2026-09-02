@@ -664,6 +664,76 @@ router.patch("/:id/panel", requireAuth, requireAccess(["ADMIN", "RECEPTION"], ["
   res.json(updated);
 });
 
+// Fields an admin can fix up after the fact from the "All Referrals" table's inline edit —
+// deliberately a superset of what the manual-add form captures, since this is also how a
+// mistyped bulk-import row or a bad OCR read gets corrected later.
+const referralEditSchema = z.object({
+  patientName: z.string().min(1).optional(),
+  patientAge: z.number().int().positive().max(130).optional(),
+  patientGender: z.enum(["MALE", "FEMALE", "OTHER"]).optional(),
+  patientPhone: z.string().nullable().optional(),
+  fileNumber: z.string().nullable().optional(),
+  doctorId: z.string().uuid().optional(),
+  panel: z.string().nullable().optional(),
+  idType: z.string().nullable().optional(),
+  idNumber: z.string().nullable().optional(),
+  forceType: z.string().nullable().optional(),
+  wardType: z.string().nullable().optional(),
+  visitType: z.enum(["IPD", "OPD"]).nullable().optional(),
+});
+
+// PATCH /api/referrals/:id  (admin + reception with MANAGE_REFERRALS) — full row edit from the
+// "All Referrals" table, as opposed to /:id/panel which only ever touched the panel field.
+router.patch("/:id", requireAuth, requireAccess(["ADMIN", "RECEPTION"], ["MANAGE_REFERRALS"]), async (req, res) => {
+  const parsed = referralEditSchema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: parsed.error.errors[0].message });
+
+  const referral = await prisma.referral.findFirst({
+    where: { id: req.params.id, doctor: { hospitalId: req.user.hospitalId } },
+  });
+  if (!referral) return res.status(404).json({ error: "Referral not found" });
+
+  const body = parsed.data;
+  const data = {};
+
+  if (body.doctorId && body.doctorId !== referral.doctorId) {
+    // Re-scope to the same hospital so an admin can't reassign a referral to a leader
+    // outside their own hospital just by knowing/guessing an id.
+    const doctor = await prisma.doctor.findFirst({ where: { id: body.doctorId, hospitalId: req.user.hospitalId } });
+    if (!doctor) return res.status(400).json({ error: "Selected leader not found" });
+    data.doctorId = body.doctorId;
+  }
+  for (const key of ["patientName", "patientAge", "patientGender"]) {
+    if (body[key] !== undefined) data[key] = body[key];
+  }
+  for (const key of ["patientPhone", "fileNumber", "panel", "idType", "idNumber", "forceType", "wardType", "visitType"]) {
+    if (body[key] === undefined) continue;
+    data[key] = typeof body[key] === "string" ? (body[key].trim() || null) : body[key];
+  }
+
+  if (Object.keys(data).length === 0) return res.status(400).json({ error: "No changes provided" });
+
+  const updated = await prisma.referral.update({
+    where: { id: referral.id },
+    data,
+    include: {
+      doctor: { select: { name: true, clinicName: true, phone: true, creditAmount: true, marketingPerson: { select: { id: true, name: true } } } },
+      transaction: { select: { id: true, amount: true, redeemed: true, redeemedAt: true } },
+    },
+  });
+
+  logActivity({
+    actor: req.user,
+    action: ACTIONS.REFERRAL_DETAILS_UPDATED,
+    entityType: "Referral",
+    entityId: referral.id,
+    entityLabel: updated.patientName,
+    changes: diffFields(referral, updated, Object.keys(data)),
+  });
+
+  res.json(updated);
+});
+
 // GET /api/referrals?search=name_or_phone&status=PENDING&page=1&pageSize=50  (reception + admin)
 // Scoped to the logged-in staff member's own hospital, via each referral's doctor.
 // Paginated server-side — returns { referrals, total, page, pageSize } rather than a raw

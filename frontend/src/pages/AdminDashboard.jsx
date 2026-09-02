@@ -22,6 +22,7 @@ import BulkImportReferralsModal from "../components/BulkImportReferralsModal";
 import ImportHistoryModal from "../components/ImportHistoryModal";
 import EditLeaderModal from "../components/EditLeaderModal";
 import AddPatientModal from "../components/AddPatientModal";
+import EditReferralModal from "../components/EditReferralModal";
 import { PANEL_OPTIONS } from "../utils/panels";
 import QrModal from "../components/QrModal";
 import MarketingPersonModal from "../components/MarketingPersonModal";
@@ -145,6 +146,7 @@ export default function AdminDashboard() {
   const [redeemModal, setRedeemModal] = useState(null); // { mode, doctor?, referral? }
   const [confirmModal, setConfirmModal] = useState(null); // referral being confirmed via IPD/OPD + file number
   const [convertModal, setConvertModal] = useState(null); // OPD referral being converted to IPD
+  const [editReferralModal, setEditReferralModal] = useState(null); // referral being edited by admin
   const [showAddPatient, setShowAddPatient] = useState(false);
 
   const [hospitalSettings, setHospitalSettings] = useState({ ipdAmount: 0, opdAmount: 0 });
@@ -1423,34 +1425,44 @@ export default function AdminDashboard() {
               <EmptyState icon={ClipboardList} title="No referrals found" subtitle="Try adjusting your filters or search" />
             ) : (
               <div className="table-wrap">
-              <table>
+              <table className="referrals-table">
                 <thead>
-                  <tr><th>Patient</th><th>File No.</th><th>Age</th><th>Gender</th><th>Phone</th><th>Referred by</th><th>Through</th><th>Status</th><th>Visit</th><th>Credit</th><th>Payout</th><th>Discharged</th><th>Panel</th><th>ID / Card</th><th>Location</th><th>Submitted</th><th></th></tr>
+                  <tr>
+                    <th>Patient</th><th>Referred by</th><th>Status</th><th>Visit</th><th>Payout</th>
+                    <th>Panel</th><th>ID / Card</th><th>Dates</th><th style={{ width: 32 }}></th><th></th>
+                  </tr>
                 </thead>
                 <tbody>
                   {referrals.map((r) => (
                     <tr key={r.id}>
-                      <td>{r.patientName}</td>
-                      <td>{r.fileNumber || "—"}</td>
-                      <td>{r.patientAge}</td>
-                      <td>{r.patientGender ? r.patientGender.charAt(0) + r.patientGender.slice(1).toLowerCase() : "—"}</td>
-                      <td>{r.patientPhone || "—"}</td>
-                      <td>{r.doctor?.name}{r.doctor?.clinicName ? ` (${r.doctor.clinicName})` : ""}</td>
-                      <td>{r.doctor?.marketingPerson?.name || "—"}</td>
-                      <td><span className={`badge ${r.status}`}>{r.status}</span></td>
-                      <td>{r.visitType || "—"}{r.convertedAt && r.visitType === "IPD" ? <span style={{ marginLeft: 4, fontSize: 11, color: "var(--ink-soft)" }}>(from OPD)</span> : null}</td>
-                      <td>{r.transaction ? `${Number(r.transaction.amount).toFixed(2)} pts` : "—"}</td>
                       <td>
-                        {r.transaction ? (
-                          <span className={`chip ${r.transaction.redeemed ? "redeemed" : "pending"}`}>{r.transaction.redeemed ? "Paid" : "Unpaid"}</span>
-                        ) : "—"}
+                        <div className="cell-primary">{r.patientName}</div>
+                        <div className="cell-secondary">
+                          {r.patientAge}{r.patientGender ? `${r.patientGender.charAt(0)}` : ""}
+                          {r.fileNumber ? ` · ${r.fileNumber}` : ""}
+                          {r.patientPhone ? ` · ${r.patientPhone}` : ""}
+                        </div>
                       </td>
-                      <td>{r.dischargedAt ? formatDateTime(r.dischargedAt) : "—"}</td>
+                      <td>
+                        <div className="cell-primary">{r.doctor?.name}{r.doctor?.clinicName ? ` (${r.doctor.clinicName})` : ""}</div>
+                        {r.doctor?.marketingPerson?.name && <div className="cell-secondary">via {r.doctor.marketingPerson.name}</div>}
+                      </td>
+                      <td><span className={`badge ${r.status}`}>{r.status}</span></td>
+                      <td>
+                        {r.visitType || "—"}
+                        {r.convertedAt && r.visitType === "IPD" ? <div className="cell-secondary">from OPD</div> : null}
+                      </td>
+                      <td>
+                        <div className="cell-primary">{r.transaction ? `${Number(r.transaction.amount).toFixed(0)} pts` : "—"}</div>
+                        {r.transaction && (
+                          <span className={`chip ${r.transaction.redeemed ? "redeemed" : "pending"}`}>{r.transaction.redeemed ? "Paid" : "Unpaid"}</span>
+                        )}
+                      </td>
                       <td>
                         <select
                           value={r.panel || ""}
                           onChange={(e) => updatePanel(r.id, e.target.value)}
-                          style={{ minWidth: 140, fontSize: 13, padding: "6px 8px" }}
+                          style={{ minWidth: 120, fontSize: 12.5, padding: "5px 6px" }}
                         >
                           <option value="">— None —</option>
                           {PANEL_OPTIONS.map((p) => (
@@ -1460,52 +1472,58 @@ export default function AdminDashboard() {
                       </td>
                       <td>
                         {r.idType ? (
-                          <div style={{ fontSize: 12.5, whiteSpace: "nowrap" }}>
-                            <div style={{ fontWeight: 600 }}>
+                          <>
+                            <div className="cell-primary">
                               {ID_TYPE_LABELS[r.idType] || r.idType}{r.idNumber ? `: ${r.idNumber}` : ""}
                             </div>
                             {(r.forceType || r.wardType) && (
-                              <div style={{ color: "var(--ink-soft)" }}>
-                                {[r.forceType, r.wardType].filter(Boolean).join(" · ")}
-                              </div>
+                              <div className="cell-secondary">{[r.forceType, r.wardType].filter(Boolean).join(" · ")}</div>
                             )}
-                          </div>
+                          </>
                         ) : "—"}
                       </td>
                       <td>
+                        <div className="cell-secondary">In: {formatDate(r.createdAt)}</div>
+                        {r.dischargedAt && <div className="cell-secondary">Out: {formatDate(r.dischargedAt)}</div>}
+                      </td>
+                      <td>
                         {r.scanLatitude != null ? (
-                          <a href={`https://www.google.com/maps?q=${r.scanLatitude},${r.scanLongitude}`} target="_blank" rel="noreferrer" style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
-                            <MapPin size={13} />
-                            {r.scanAddress ? r.scanAddress.slice(0, 30) + (r.scanAddress.length > 30 ? "…" : "") : "View on map"}
+                          <a
+                            href={`https://www.google.com/maps?q=${r.scanLatitude},${r.scanLongitude}`}
+                            target="_blank" rel="noreferrer"
+                            title={r.scanAddress || "View on map"}
+                            style={{ display: "inline-flex" }}
+                          >
+                            <MapPin size={14} />
                           </a>
                         ) : (
-                          <span style={{ color: "var(--ink-soft)" }}>Not shared</span>
+                          <span style={{ color: "var(--border)" }} title="Location not shared"><MapPin size={14} /></span>
                         )}
                       </td>
-                      <td>{formatDate(r.createdAt)}</td>
                       <td className="row-hover-actions" style={{ whiteSpace: "nowrap" }}>
-                        <div style={{ display: "flex", gap: 6 }}>
+                        <div style={{ display: "flex", gap: 4, justifyContent: "flex-end" }}>
                           {r.status === "PENDING" && (
                             <>
-                              <button style={{ width: "auto", padding: "6px 10px" }} onClick={() => openConfirmModal(r)}><CheckCircle2 size={14} />Confirm</button>
-                              <button className="danger" style={{ width: "auto", padding: "6px 10px" }} onClick={() => reject(r.id)}><XCircle size={14} />Reject</button>
+                              <button style={{ width: "auto", padding: 7 }} title="Confirm" onClick={() => openConfirmModal(r)}><CheckCircle2 size={14} /></button>
+                              <button className="danger" style={{ width: "auto", padding: 7 }} title="Reject" onClick={() => reject(r.id)}><XCircle size={14} /></button>
                             </>
                           )}
                           {r.status === "CREDITED" && r.visitType === "OPD" && (
-                            <button style={{ width: "auto", padding: "6px 10px" }} onClick={() => openConvertModal(r)}><ArrowUpCircle size={14} />Convert to IPD</button>
+                            <button style={{ width: "auto", padding: 7 }} title="Convert to IPD" onClick={() => openConvertModal(r)}><ArrowUpCircle size={14} /></button>
                           )}
                           {r.status === "CREDITED" && !r.dischargedAt && (
-                            <button style={{ width: "auto", padding: "6px 10px" }} onClick={() => discharge(r)}><LogOut size={14} />Discharge</button>
+                            <button style={{ width: "auto", padding: 7 }} title="Discharge" onClick={() => discharge(r)}><LogOut size={14} /></button>
                           )}
                           {r.status === "REJECTED" && (
-                            <button style={{ width: "auto", padding: "6px 10px" }} onClick={() => revertReferral(r.id)}><RotateCcw size={14} />Revert</button>
+                            <button style={{ width: "auto", padding: 7 }} title="Revert" onClick={() => revertReferral(r.id)}><RotateCcw size={14} /></button>
                           )}
                           {r.transaction && !r.transaction.redeemed && (
-                            <button className="btn-redeem" style={{ width: "auto", padding: "6px 14px" }} onClick={() => setRedeemModal({ mode: "single", referral: r, defaultAmount: Number(r.transaction.amount) })}>
-                              <Wallet size={14} />Redeem
+                            <button className="btn-redeem" style={{ width: "auto", padding: 7 }} title="Redeem" onClick={() => setRedeemModal({ mode: "single", referral: r, defaultAmount: Number(r.transaction.amount) })}>
+                              <Wallet size={14} />
                             </button>
                           )}
-                          <button className="danger" style={{ width: "auto", padding: "6px 10px" }} onClick={() => deleteReferral(r)} title="Delete this referral"><Trash2 size={14} /></button>
+                          <button className="secondary" style={{ width: "auto", padding: 7 }} title="Edit" onClick={() => setEditReferralModal(r)}><Pencil size={14} /></button>
+                          <button className="danger" style={{ width: "auto", padding: 7 }} title="Delete" onClick={() => deleteReferral(r)}><Trash2 size={14} /></button>
                         </div>
                       </td>
                     </tr>
@@ -1557,6 +1575,18 @@ export default function AdminDashboard() {
           onConfirm={confirmSingleRedeem}
         />
       )}
+      {editReferralModal && (
+        <EditReferralModal
+          referral={editReferralModal}
+          onClose={() => setEditReferralModal(null)}
+          onSaved={() => {
+            setEditReferralModal(null);
+            setMessage("Referral updated.");
+            loadReferrals();
+          }}
+        />
+      )}
+
       {confirmModal && (
         <ConfirmLeadModal
           patientName={confirmModal.patientName}

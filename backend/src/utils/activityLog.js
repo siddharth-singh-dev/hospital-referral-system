@@ -9,6 +9,7 @@ export const ACTIONS = {
   REFERRAL_BULK_IMPORTED: "referral.bulk_imported",
   REFERRAL_BULK_IMPORT_REVERTED: "referral.bulk_import_reverted",
   REFERRAL_PANEL_UPDATED: "referral.panel_updated",
+  REFERRAL_DETAILS_UPDATED: "referral.details_updated", // admin edited the row inline (name/age/panel/ID card fields/etc.)
   REFERRAL_ARRIVED: "referral.arrived",
   REFERRAL_CONVERTED_TO_IPD: "referral.converted_to_ipd",
   REFERRAL_DISCHARGED: "referral.discharged",
