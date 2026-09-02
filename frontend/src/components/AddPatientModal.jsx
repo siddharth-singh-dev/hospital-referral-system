@@ -108,6 +108,7 @@ export default function AddPatientModal({ onClose, onAdded }) {
   }, []);
 
   const CARD_LABELS = { AADHAAR: "Aadhaar", AYUSHMAN: "Ayushman", CGHS: "CGHS", ECHS: "ECHS", CAPF: "CAPF" };
+  const CARD_TYPE_OPTIONS = ["AADHAAR", "AYUSHMAN", "CGHS", "ECHS", "CAPF"];
 
   function handleScanExtracted(result) {
     if (result.patientName) setPatientName(result.patientName);
@@ -205,6 +206,15 @@ export default function AddPatientModal({ onClose, onAdded }) {
           <option value="">— None —</option>
           {PANEL_OPTIONS.map((p) => <option key={p} value={p}>{p}</option>)}
         </select>
+
+        <label>ID / card type (optional)</label>
+        <select value={idType} onChange={(e) => setIdType(e.target.value)}>
+          <option value="">— None —</option>
+          {CARD_TYPE_OPTIONS.map((t) => <option key={t} value={t}>{CARD_LABELS[t]}</option>)}
+        </select>
+        <p style={{ fontSize: 11.5, color: "var(--ink-soft)", marginTop: -6, marginBottom: 8 }}>
+          Set automatically after a card scan — pick it here instead if you're entering details by hand.
+        </p>
 
         {idType === "AADHAAR" && (
           <>

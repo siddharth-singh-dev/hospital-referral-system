@@ -224,13 +224,17 @@ router.get("/bulk-import/template", requireAuth, requireRole("ADMIN"), async (re
     { header: "Marketing Person", key: "marketingPerson", width: 22 },
     { header: "Visit Type", key: "visitType", width: 12 },
     { header: "Panel", key: "panel", width: 26 },
+    { header: "ID Type", key: "idType", width: 12 },
+    { header: "ID Number", key: "idNumber", width: 20 },
+    { header: "Force / Category", key: "forceType", width: 18 },
+    { header: "Ward Type", key: "wardType", width: 18 },
     { header: "Credit Amount", key: "creditAmount", width: 14 },
     { header: "Submitted Date", key: "submittedDate", width: 16 },
     { header: "Discharged Date", key: "dischargedDate", width: 16 },
   ];
   sheet.getRow(1).font = { bold: true };
-  sheet.addRow({ name: "Ramesh Kumar", fileNumber: "IPD-3001", age: 45, gender: "Male", phone: "9876500000", referredBy: "Dr Niraj", marketingPerson: "Munesh Rana", visitType: "IPD", panel: "CGHS", creditAmount: "", submittedDate: "", dischargedDate: "" });
-  sheet.addRow({ name: "Sunita Devi", fileNumber: "OPD-3002", age: 30, gender: "Female", phone: "", referredBy: "", marketingPerson: "", visitType: "OPD", panel: "", creditAmount: "", submittedDate: "", dischargedDate: "" });
+  sheet.addRow({ name: "Ramesh Kumar", fileNumber: "IPD-3001", age: 45, gender: "Male", phone: "9876500000", referredBy: "Dr Niraj", marketingPerson: "Munesh Rana", visitType: "IPD", panel: "CGHS", idType: "CGHS", idNumber: "12345678", forceType: "Pensioner", wardType: "Semi-Private Ward", creditAmount: "", submittedDate: "", dischargedDate: "" });
+  sheet.addRow({ name: "Sunita Devi", fileNumber: "OPD-3002", age: 30, gender: "Female", phone: "", referredBy: "", marketingPerson: "", visitType: "OPD", panel: "", idType: "", idNumber: "", forceType: "", wardType: "", creditAmount: "", submittedDate: "", dischargedDate: "" });
 
   res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
   res.setHeader("Content-Disposition", "attachment; filename=referred-patients-bulk-import-template.xlsx");
@@ -278,6 +282,14 @@ router.post("/bulk-import", requireAuth, requireRole("ADMIN"), upload.single("fi
   const marketingPersonCol = findCol("marketing person", "marketing", "through");
   const visitTypeCol = findCol("visit type", "visit", "type");
   const panelCol = findCol("panel");
+  // Same fields the OCR card scan and the manual "Add patient" form capture — see
+  // Referral.idType/idNumber/forceType/wardType in schema.prisma. Free text on import, same
+  // as manual entry; not restricted to the OCR's five known card types, since a historical
+  // backfill row might reasonably say something else.
+  const idTypeCol = findCol("id type", "idtype", "card type");
+  const idNumberCol = findCol("id number", "idnumber", "card number", "id / card", "id/card");
+  const forceTypeCol = findCol("force / category", "force/category", "force type", "forcetype", "force", "category");
+  const wardTypeCol = findCol("ward type", "wardtype", "ward");
   const creditCol = findCol("credit amount", "credit", "amount");
   const submittedCol = findCol("submitted date", "submitted", "date");
   const dischargedCol = findCol("discharged date", "discharge date", "discharged");
@@ -373,6 +385,16 @@ router.post("/bulk-import", requireAuth, requireRole("ADMIN"), upload.single("fi
     const t = text.trim().toUpperCase();
     return t === "IPD" || t === "OPD" ? t : null;
   };
+  // Normalizes to the five known card types (matching the OCR scanner's CARD_TYPES) if it's
+  // a recognizable one, but doesn't reject anything else — a historical backfill row is
+  // manually-typed free text, same as the "Add patient" form allows.
+  const KNOWN_ID_TYPES = new Set(["AADHAAR", "AYUSHMAN", "CGHS", "ECHS", "CAPF"]);
+  const parseIdType = (text) => {
+    const t = text.trim();
+    if (!t) return null;
+    const upper = t.toUpperCase();
+    return KNOWN_ID_TYPES.has(upper) ? upper : t;
+  };
 
   // One row tying every referral created by this upload together, so the whole import can
   // be reviewed and undone as a unit later from "Import history" instead of row-by-row.
@@ -448,6 +470,10 @@ router.post("/bulk-import", requireAuth, requireRole("ADMIN"), upload.single("fi
       const patientPhone = getText(row, phoneCol) || null;
       const visitType = parseVisitType(getText(row, visitTypeCol));
       const panel = getText(row, panelCol) || null;
+      const idType = parseIdType(getText(row, idTypeCol));
+      const idNumber = getText(row, idNumberCol) || null;
+      const forceType = getText(row, forceTypeCol) || null;
+      const wardType = getText(row, wardTypeCol) || null;
       const submittedDate = parseDate(row, submittedCol);
       const dischargedDate = parseDate(row, dischargedCol);
 
@@ -467,6 +493,10 @@ router.post("/bulk-import", requireAuth, requireRole("ADMIN"), upload.single("fi
           fileNumber,
           visitType,
           panel,
+          idType,
+          idNumber,
+          forceType,
+          wardType,
           arrivedAt: submittedDate || new Date(),
           dischargedAt: dischargedDate,
           importBatchId: batch.id,
