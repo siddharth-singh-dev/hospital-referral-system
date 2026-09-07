@@ -308,7 +308,18 @@ router.post("/bulk-import", requireAuth, requireRole("ADMIN"), upload.single("fi
   // Cache leaders by lowercased name so repeat names across rows don't re-query/re-create.
   const existingLeaders = await prisma.doctor.findMany({ where: { hospitalId: req.user.hospitalId } });
   const leaderCache = new Map(existingLeaders.map((d) => [d.name.trim().toLowerCase(), d]));
-  let selfLeader = leaderCache.get("self") || null;
+  // "Self" placeholder leader(s), used when a row has no "Referred By" name — keyed by
+  // marketing person rather than one single shared record. Marketing-person attribution lives
+  // on the Doctor row (Doctor.marketingPersonId), not on the Referral itself, so collapsing
+  // every blank-"Referred By" row onto one shared "Self" leader would lock ALL of them to
+  // whichever marketing person happened to appear in the first such row — exactly the bug
+  // reported from a real import where every row correctly listed a different Marketing Person
+  // but no Referred By, and all 140 referrals still ended up attributed to just one of them.
+  const selfLeaderCache = new Map(
+    existingLeaders
+      .filter((d) => d.name.trim().toLowerCase() === "self")
+      .map((d) => [d.marketingPersonId || "none", d])
+  );
   let newLeadersCreated = 0;
 
   // Same caching approach for marketing persons, matched/created by name.
@@ -454,12 +465,12 @@ router.post("/bulk-import", requireAuth, requireRole("ADMIN"), upload.single("fi
           leaderCache.set(key, doctor);
         }
       } else {
+        const selfKey = marketingPersonId || "none";
+        let selfLeader = selfLeaderCache.get(selfKey);
         if (!selfLeader) {
           selfLeader = await prisma.doctor.create({ data: { name: "Self", hospitalId: req.user.hospitalId, marketingPersonId } });
-          leaderCache.set("self", selfLeader);
-        } else if (marketingPersonId && !selfLeader.marketingPersonId) {
-          selfLeader = await prisma.doctor.update({ where: { id: selfLeader.id }, data: { marketingPersonId } });
-          leaderCache.set("self", selfLeader);
+          selfLeaderCache.set(selfKey, selfLeader);
+          newLeadersCreated += 1;
         }
         doctor = selfLeader;
       }
