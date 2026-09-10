@@ -57,7 +57,6 @@ const DOCTORS_PAGE_SIZE = 8;
 const REFERRALS_PAGE_SIZE = 50;
 
 const DASHBOARD_PERIODS = [["week", "7D"], ["month", "30D"], ["3months", "3M"], ["6months", "6M"], ["year", "1Y"]];
-const ID_TYPE_LABELS = { AADHAAR: "Aadhaar", AYUSHMAN: "Ayushman", CGHS: "CGHS", ECHS: "ECHS", CAPF: "CAPF" };
 
 // Small pill-style period switcher shared by the Top Doctors / Top Marketing Emp / Pending
 // Redemptions dashboard cards.
@@ -1471,11 +1470,9 @@ export default function AdminDashboard() {
                         </select>
                       </td>
                       <td>
-                        {r.idType ? (
+                        {(r.idNumber || r.forceType || r.wardType) ? (
                           <>
-                            <div className="cell-primary">
-                              {ID_TYPE_LABELS[r.idType] || r.idType}{r.idNumber ? `: ${r.idNumber}` : ""}
-                            </div>
+                            {r.idNumber && <div className="cell-primary">{r.idNumber}</div>}
                             {(r.forceType || r.wardType) && (
                               <div className="cell-secondary">{[r.forceType, r.wardType].filter(Boolean).join(" · ")}</div>
                             )}
@@ -1664,12 +1661,13 @@ export default function AdminDashboard() {
           onClose={() => setShowAddPatient(false)}
           onAdded={(data) => {
             setShowAddPatient(false);
+            const statusLabel = data?.credited ? "Credited" : "Pending";
             setMessage(
               data?.newLeaderCreated
-                ? `Patient added — "${data.doctorName}" was created as a new leader. Now showing under Pending.`
-                : "Patient added — now showing under Pending."
+                ? `Patient added — "${data.doctorName}" was created as a new leader. Now showing under ${statusLabel}.`
+                : `Patient added — now showing under ${statusLabel}.`
             );
-            setReferralTab("PENDING");
+            setReferralTab(data?.credited ? "CREDITED" : "PENDING");
             loadReferrals();
             loadDoctorsAndStaff();
           }}

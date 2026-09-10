@@ -283,12 +283,13 @@ export default function ReceptionDashboard() {
           onClose={() => setShowAddPatient(false)}
           onAdded={(data) => {
             setShowAddPatient(false);
+            const statusLabel = data?.credited ? "Credited" : "Pending";
             setMessage(
               data?.newLeaderCreated
-                ? `Patient added — "${data.doctorName}" was created as a new leader. Now showing under Pending.`
-                : "Patient added — now showing under Pending."
+                ? `Patient added — "${data.doctorName}" was created as a new leader. Now showing under ${statusLabel}.`
+                : `Patient added — now showing under ${statusLabel}.`
             );
-            setTab("PENDING");
+            setTab(data?.credited ? "CREDITED" : "PENDING");
             load();
           }}
         />

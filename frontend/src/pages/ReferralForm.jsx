@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
 import api from "../api/client";
 import CardScanUpload from "../components/CardScanUpload";
+import { PANEL_OPTIONS } from "../utils/panels";
 
 export default function ReferralForm() {
   const { doctorCode } = useParams();
@@ -10,7 +11,6 @@ export default function ReferralForm() {
   const [gender, setGender] = useState("");
   const [phone, setPhone] = useState("");
   const [panel, setPanel] = useState("");
-  const [idType, setIdType] = useState("");
   const [idNumber, setIdNumber] = useState("");
   const [forceType, setForceType] = useState("");
   const [wardType, setWardType] = useState("");
@@ -62,7 +62,6 @@ export default function ReferralForm() {
     if (result.patientAge) setAge(String(result.patientAge));
     if (result.patientGender) setGender(result.patientGender);
     if (result.panel) setPanel(result.panel);
-    setIdType(result.cardType || "");
     setIdNumber(result.idNumberMasked || "");
     setForceType(result.forceType || "");
     setWardType(result.wardType || "");
@@ -88,7 +87,6 @@ export default function ReferralForm() {
         patientGender: gender,
         patientPhone: phone || undefined,
         panel: panel || undefined,
-        idType: idType || undefined,
         idNumber: idNumber.trim() || undefined,
         forceType: forceType.trim() || undefined,
         wardType: wardType.trim() || undefined,
@@ -185,28 +183,20 @@ export default function ReferralForm() {
             <label>Patient phone (optional)</label>
             <input value={phone} onChange={(e) => setPhone(e.target.value)} />
 
-            {idType === "AADHAAR" && (
-              <>
-                <label>Aadhaar number</label>
-                <input value={idNumber} onChange={(e) => setIdNumber(e.target.value)} />
-              </>
-            )}
-            {idType === "AYUSHMAN" && (
-              <>
-                <label>Ayushman number</label>
-                <input value={idNumber} onChange={(e) => setIdNumber(e.target.value)} />
-              </>
-            )}
-            {(idType === "CGHS" || idType === "ECHS" || idType === "CAPF") && (
-              <>
-                <label>Force / category</label>
-                <input value={forceType} onChange={(e) => setForceType(e.target.value)} />
-                <label>Ward type</label>
-                <input value={wardType} onChange={(e) => setWardType(e.target.value)} />
-                <label>Card number</label>
-                <input value={idNumber} onChange={(e) => setIdNumber(e.target.value)} />
-              </>
-            )}
+            <label>Panel (optional)</label>
+            <select value={panel} onChange={(e) => setPanel(e.target.value)}>
+              <option value="">— None —</option>
+              {PANEL_OPTIONS.map((p) => <option key={p} value={p}>{p}</option>)}
+            </select>
+
+            <label>ID number (optional)</label>
+            <input value={idNumber} onChange={(e) => setIdNumber(e.target.value)} placeholder="Aadhaar, Ayushman, CGHS/ECHS/CAPF card number, etc." />
+
+            <label>Force / category (optional)</label>
+            <input value={forceType} onChange={(e) => setForceType(e.target.value)} placeholder="e.g. Cash Patient, Ayushman Bharat, BSF, Pensioner" />
+
+            <label>Ward type (optional)</label>
+            <input value={wardType} onChange={(e) => setWardType(e.target.value)} placeholder="e.g. General Ward, Semi-Private Ward, ICU, NICU" />
 
             {error && <p className="error">{error}</p>}
 

@@ -4,17 +4,25 @@ import Modal from "./Modal";
 import api from "../api/client";
 import { PANEL_OPTIONS } from "../utils/panels";
 
-const CARD_LABELS = { AADHAAR: "Aadhaar", AYUSHMAN: "Ayushman", CGHS: "CGHS", ECHS: "ECHS", CAPF: "CAPF" };
-const CARD_TYPE_OPTIONS = ["AADHAAR", "AYUSHMAN", "CGHS", "ECHS", "CAPF"];
+// Converts an ISO timestamp from the API into the "YYYY-MM-DDTHH:mm" shape a
+// <input type="datetime-local"> expects, in the browser's local time. Empty/missing
+// input just clears the field rather than throwing.
+function toDatetimeLocal(isoString) {
+  if (!isoString) return "";
+  const d = new Date(isoString);
+  if (Number.isNaN(d.getTime())) return "";
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
 
 // Full-row edit for a referral, opened from the pencil icon in the "All Referrals" table.
-// Covers the same fields the manual "Add patient" form captures, plus reassigning the
-// referring leader and fixing the visit type — this is the admin's fix-up path for a bad OCR
-// read, a mistyped bulk-import row, or anything else that needs correcting after the fact.
+// Covers the same fields the manual "Add patient" form captures, plus the admission/discharge
+// dates and credit amount that get set later by Confirm/Discharge/Redeem — this is the admin's
+// fix-up path for a bad OCR read, a mistyped bulk-import row, or anything else that needs
+// correcting after the fact. "Referred by" and Marketing Person are intentionally NOT editable
+// here: the referring leader is fixed once a referral exists, and Marketing Person always
+// follows from that leader rather than being entered directly.
 export default function EditReferralModal({ referral, onClose, onSaved }) {
-  const [leaders, setLeaders] = useState([]);
-  const [loadingLeaders, setLoadingLeaders] = useState(true);
-  const [doctorId, setDoctorId] = useState(referral.doctorId || referral.doctor?.id || "");
   const [patientName, setPatientName] = useState(referral.patientName || "");
   const [patientAge, setPatientAge] = useState(referral.patientAge != null ? String(referral.patientAge) : "");
   const [patientGender, setPatientGender] = useState(referral.patientGender || "MALE");
@@ -22,25 +30,14 @@ export default function EditReferralModal({ referral, onClose, onSaved }) {
   const [fileNumber, setFileNumber] = useState(referral.fileNumber || "");
   const [visitType, setVisitType] = useState(referral.visitType || "");
   const [panel, setPanel] = useState(referral.panel || "");
-  const [idType, setIdType] = useState(referral.idType || "");
   const [idNumber, setIdNumber] = useState(referral.idNumber || "");
   const [forceType, setForceType] = useState(referral.forceType || "");
   const [wardType, setWardType] = useState(referral.wardType || "");
+  const [admissionDate, setAdmissionDate] = useState(toDatetimeLocal(referral.createdAt));
+  const [dischargedDate, setDischargedDate] = useState(toDatetimeLocal(referral.dischargedAt));
+  const [creditAmount, setCreditAmount] = useState(referral.transaction ? String(referral.transaction.amount) : "");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
-
-  useEffect(() => {
-    (async () => {
-      try {
-        const { data } = await api.get("/doctors/lite");
-        setLeaders(data);
-      } catch {
-        setError("Could not load the list of leaders. Try again in a moment.");
-      } finally {
-        setLoadingLeaders(false);
-      }
-    })();
-  }, []);
 
   async function handleSubmit(e) {
     e.preventDefault();
@@ -48,7 +45,6 @@ export default function EditReferralModal({ referral, onClose, onSaved }) {
     setSubmitting(true);
     try {
       const payload = {
-        doctorId: doctorId || undefined,
         patientName: patientName.trim(),
         patientAge: Number(patientAge),
         patientGender,
@@ -56,10 +52,12 @@ export default function EditReferralModal({ referral, onClose, onSaved }) {
         fileNumber: fileNumber.trim() || null,
         visitType: visitType || null,
         panel: panel || null,
-        idType: idType || null,
         idNumber: idNumber.trim() || null,
         forceType: forceType.trim() || null,
         wardType: wardType.trim() || null,
+        admissionDate: admissionDate || null,
+        dischargedDate: dischargedDate || null,
+        ...(referral.transaction ? { creditAmount: creditAmount.trim() !== "" ? Number(creditAmount) : null } : {}),
       };
       const { data } = await api.patch(`/referrals/${referral.id}`, payload);
       onSaved?.(data);
@@ -73,15 +71,13 @@ export default function EditReferralModal({ referral, onClose, onSaved }) {
     <Modal title="Edit referral" onClose={onClose} width={440}>
       <form onSubmit={handleSubmit}>
         <label>Referred by</label>
-        <select value={doctorId} onChange={(e) => setDoctorId(e.target.value)} disabled={loadingLeaders} required>
-          {loadingLeaders && <option value="">Loading leaders…</option>}
-          {!loadingLeaders && !leaders.some((l) => l.id === doctorId) && (
-            <option value={doctorId}>{referral.doctor?.name}{referral.doctor?.clinicName ? ` (${referral.doctor.clinicName})` : ""}</option>
-          )}
-          {leaders.map((l) => (
-            <option key={l.id} value={l.id}>{l.name}{l.clinicName ? ` (${l.clinicName})` : ""}</option>
-          ))}
-        </select>
+        <input
+          value={`${referral.doctor?.name || ""}${referral.doctor?.clinicName ? ` (${referral.doctor.clinicName})` : ""}`}
+          disabled
+        />
+        <p style={{ fontSize: 11.5, color: "var(--ink-soft)", marginTop: -6, marginBottom: 8 }}>
+          Not editable here — the referring leader is fixed once a referral exists.
+        </p>
 
         <label>Patient name</label>
         <input value={patientName} onChange={(e) => setPatientName(e.target.value)} required />
@@ -123,38 +119,33 @@ export default function EditReferralModal({ referral, onClose, onSaved }) {
           {PANEL_OPTIONS.map((p) => <option key={p} value={p}>{p}</option>)}
         </select>
 
-        <label>ID / card type (optional)</label>
-        <select value={idType} onChange={(e) => setIdType(e.target.value)}>
-          <option value="">— None —</option>
-          {CARD_TYPE_OPTIONS.map((t) => <option key={t} value={t}>{CARD_LABELS[t]}</option>)}
-        </select>
+        <label>ID number (optional)</label>
+        <input value={idNumber} onChange={(e) => setIdNumber(e.target.value)} placeholder="Aadhaar, Ayushman, CGHS/ECHS/CAPF card number, etc." />
 
-        {idType === "AADHAAR" && (
-          <>
-            <label>Aadhaar number</label>
-            <input value={idNumber} onChange={(e) => setIdNumber(e.target.value)} placeholder="XXXX XXXX 1234" />
-          </>
-        )}
-        {idType === "AYUSHMAN" && (
-          <>
-            <label>Ayushman number</label>
-            <input value={idNumber} onChange={(e) => setIdNumber(e.target.value)} />
-          </>
-        )}
-        {(idType === "CGHS" || idType === "ECHS" || idType === "CAPF") && (
-          <>
-            <label>Force / category</label>
-            <input value={forceType} onChange={(e) => setForceType(e.target.value)} placeholder="e.g. BSF, ARMY, Pensioner" />
-            <label>Ward type</label>
-            <input value={wardType} onChange={(e) => setWardType(e.target.value)} placeholder="e.g. Semi-Private Ward" />
-            <label>Card number</label>
-            <input value={idNumber} onChange={(e) => setIdNumber(e.target.value)} />
-          </>
-        )}
+        <label>Force / category (optional)</label>
+        <input value={forceType} onChange={(e) => setForceType(e.target.value)} placeholder="e.g. Cash Patient, Ayushman Bharat, BSF, Pensioner" />
+
+        <label>Ward type (optional)</label>
+        <input value={wardType} onChange={(e) => setWardType(e.target.value)} placeholder="e.g. General Ward, Semi-Private Ward, ICU, NICU" />
+
+        <label>Admission date (optional)</label>
+        <input type="datetime-local" value={admissionDate} onChange={(e) => setAdmissionDate(e.target.value)} />
+
+        <label>Discharged date (optional)</label>
+        <input type="datetime-local" value={dischargedDate} onChange={(e) => setDischargedDate(e.target.value)} />
+
+        <label>Credit amount{referral.transaction ? "" : " (not credited yet)"}</label>
+        <input
+          type="number" min="0" step="0.01"
+          value={creditAmount}
+          onChange={(e) => setCreditAmount(e.target.value)}
+          disabled={!referral.transaction}
+          placeholder={referral.transaction ? "" : "This referral hasn't been credited yet"}
+        />
 
         {error && <p className="error">{error}</p>}
 
-        <button type="submit" disabled={submitting || loadingLeaders} style={{ marginTop: 8 }}>
+        <button type="submit" disabled={submitting} style={{ marginTop: 8 }}>
           <Save size={16} />
           {submitting ? "Saving…" : "Save changes"}
         </button>

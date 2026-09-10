@@ -9,6 +9,7 @@ import { requireAuth, requireRole, requireAccess } from "../middleware/auth.js";
 import { startOfIstDay, istDayBounds } from "../utils/istDate.js";
 import { formatDate, formatDateTime } from "../utils/formatDate.js";
 import { logActivity, diffFields, ACTIONS } from "../utils/activityLog.js";
+import { normalizePanel } from "../utils/panels.js";
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024 } });
 
@@ -28,7 +29,6 @@ const referralSchema = z.object({
   patientPhone: z.string().optional(),
   patientGender: z.enum(["MALE", "FEMALE", "OTHER"]),
   panel: z.string().optional(),
-  idType: z.string().optional(),
   idNumber: z.string().optional(),
   forceType: z.string().optional(),
   wardType: z.string().optional(),
@@ -90,7 +90,7 @@ router.post("/", publicLimiter, async (req, res) => {
   if (!parsed.success) {
     return res.status(400).json({ error: parsed.error.flatten() });
   }
-  const { doctorCode, patientName, patientAge, patientPhone, patientGender, panel, idType, idNumber, forceType, wardType, scanLatitude, scanLongitude, scanAccuracyM } =
+  const { doctorCode, patientName, patientAge, patientPhone, patientGender, panel, idNumber, forceType, wardType, scanLatitude, scanLongitude, scanAccuracyM } =
     parsed.data;
 
   const doctor = await prisma.doctor.findUnique({ where: { uniqueCode: doctorCode } });
@@ -111,7 +111,6 @@ router.post("/", publicLimiter, async (req, res) => {
       patientPhone,
       patientGender,
       panel: panel || null,
-      idType: idType || null,
       idNumber: idNumber || null,
       forceType: forceType || null,
       wardType: wardType || null,
@@ -144,18 +143,39 @@ const manualReferralSchema = z.object({
   patientPhone: z.string().optional(),
   patientGender: z.enum(["MALE", "FEMALE", "OTHER"]),
   panel: z.string().optional(),
-  idType: z.string().optional(),
   idNumber: z.string().optional(),
   forceType: z.string().optional(),
   wardType: z.string().optional(),
+  // Matches the bulk-import template's fields. All optional, but fileNumber and visitType
+  // are a pair — if the file number and visit type are already known at add time (the usual
+  // case: reception is entering a patient who's already registered), the referral is created
+  // straight as CREDITED, same as one row of a bulk import. Leaving both blank keeps the old
+  // behavior: a PENDING lead that still goes through the separate "Confirm lead" step.
+  fileNumber: z.string().optional(),
+  visitType: z.enum(["IPD", "OPD"]).optional(),
+  creditAmount: z.number().nonnegative().optional(),
+  admissionDate: z.string().optional(),
+  dischargedDate: z.string().optional(),
 }).refine((data) => Boolean(data.doctorId) !== Boolean(data.newLeaderName), {
   message: "Provide either an existing leader (doctorId) or a new leader's name, not both or neither",
+}).refine((data) => Boolean(data.fileNumber) === Boolean(data.visitType), {
+  message: "Provide both File No. and Visit Type together, or leave both blank",
+  path: ["fileNumber"],
+}).refine((data) => !data.dischargedDate || Boolean(data.fileNumber), {
+  message: "Discharged date requires File No. and Visit Type to be set",
+  path: ["dischargedDate"],
 });
 
 // POST /api/referrals/manual  (reception + admin) - a patient walks in directly (e.g. they
 // mention a leader referred them, but never scanned the QR themselves). Reception picks the
-// referring leader from a dropdown and enters the patient's details on their behalf. Lands
-// in PENDING just like a normal submission, so it still goes through the usual confirm flow.
+// referring leader from a dropdown and enters the patient's details on their behalf.
+//
+// If File No. and Visit Type are provided (the common case — reception already knows these
+// at add time), the referral is created straight as CREDITED and a credit transaction is
+// recorded immediately, exactly like one row of a bulk import — no separate confirm step
+// needed. If both are left blank, this behaves as before: a PENDING lead that goes through
+// the usual "Confirm lead" flow once the patient is registered.
+//
 // If the leader isn't in the system yet, reception can type a new name instead of picking one
 // (newLeaderName) — a minimal leader profile (name only, no phone) is created on the fly and
 // can be filled in later from the Leaders tab.
@@ -164,7 +184,11 @@ router.post("/manual", requireAuth, requireAccess(["ADMIN", "RECEPTION"], ["MANA
   if (!parsed.success) {
     return res.status(400).json({ error: parsed.error.flatten() });
   }
-  const { doctorId, newLeaderName, patientName, patientAge, patientPhone, patientGender, panel, idType, idNumber, forceType, wardType } = parsed.data;
+  const {
+    doctorId, newLeaderName, patientName, patientAge, patientPhone, patientGender,
+    panel, idNumber, forceType, wardType,
+    fileNumber, visitType, creditAmount, admissionDate, dischargedDate,
+  } = parsed.data;
 
   let doctor;
   let newLeaderCreated = false;
@@ -178,13 +202,53 @@ router.post("/manual", requireAuth, requireAccess(["ADMIN", "RECEPTION"], ["MANA
     newLeaderCreated = true;
   }
 
+  const submitted = admissionDate ? new Date(admissionDate) : null;
+  const discharged = dischargedDate ? new Date(dischargedDate) : null;
+  const isCredited = Boolean(fileNumber && visitType);
+
+  let resolvedCreditAmount = null;
+  if (isCredited) {
+    if (creditAmount !== undefined) {
+      resolvedCreditAmount = creditAmount;
+    } else {
+      const hospital = await prisma.hospital.findUnique({
+        where: { id: req.user.hospitalId },
+        select: { ipdAmount: true, opdAmount: true },
+      });
+      resolvedCreditAmount = Number(visitType === "IPD" ? hospital.ipdAmount : hospital.opdAmount);
+    }
+  }
+
   const referral = await prisma.referral.create({
     data: {
       doctorId: doctor.id, patientName, patientAge, patientPhone, patientGender,
-      panel: panel || null, idType: idType || null, idNumber: idNumber || null,
+      panel: panel || null, idNumber: idNumber || null,
       forceType: forceType || null, wardType: wardType || null,
+      ...(isCredited
+        ? {
+            status: "CREDITED",
+            fileNumber,
+            visitType,
+            arrivedAt: submitted || new Date(),
+            dischargedAt: discharged || null,
+            matchedByUserId: req.user.id,
+            ...(submitted ? { createdAt: submitted } : {}),
+          }
+        : {}),
     },
   });
+
+  if (isCredited && resolvedCreditAmount !== null) {
+    await prisma.creditTransaction.create({
+      data: {
+        doctorId: doctor.id,
+        referralId: referral.id,
+        amount: resolvedCreditAmount,
+        note: `Added by ${req.user.name} — File No. ${fileNumber}`,
+        ...(submitted ? { createdAt: submitted } : {}),
+      },
+    });
+  }
 
   if (newLeaderCreated) {
     logActivity({
@@ -202,10 +266,10 @@ router.post("/manual", requireAuth, requireAccess(["ADMIN", "RECEPTION"], ["MANA
     entityType: "Referral",
     entityId: referral.id,
     entityLabel: patientName,
-    metadata: { doctorId: doctor.id, doctorName: doctor.name },
+    metadata: { doctorId: doctor.id, doctorName: doctor.name, credited: isCredited },
   });
 
-  res.status(201).json({ message: "Patient added successfully", referralId: referral.id, newLeaderCreated, doctorName: doctor.name });
+  res.status(201).json({ message: "Patient added successfully", referralId: referral.id, newLeaderCreated, doctorName: doctor.name, credited: isCredited });
 });
 
 // GET /api/referrals/bulk-import/template  (admin) - downloadable Excel template for
@@ -224,17 +288,16 @@ router.get("/bulk-import/template", requireAuth, requireRole("ADMIN"), async (re
     { header: "Marketing Person", key: "marketingPerson", width: 22 },
     { header: "Visit Type", key: "visitType", width: 12 },
     { header: "Panel", key: "panel", width: 26 },
-    { header: "ID Type", key: "idType", width: 12 },
     { header: "ID Number", key: "idNumber", width: 20 },
     { header: "Force / Category", key: "forceType", width: 18 },
     { header: "Ward Type", key: "wardType", width: 18 },
     { header: "Credit Amount", key: "creditAmount", width: 14 },
-    { header: "Submitted Date", key: "submittedDate", width: 16 },
+    { header: "Admission Date", key: "admissionDate", width: 16 },
     { header: "Discharged Date", key: "dischargedDate", width: 16 },
   ];
   sheet.getRow(1).font = { bold: true };
-  sheet.addRow({ name: "Ramesh Kumar", fileNumber: "IPD-3001", age: 45, gender: "Male", phone: "9876500000", referredBy: "Dr Niraj", marketingPerson: "Munesh Rana", visitType: "IPD", panel: "CGHS", idType: "CGHS", idNumber: "12345678", forceType: "Pensioner", wardType: "Semi-Private Ward", creditAmount: "", submittedDate: "", dischargedDate: "" });
-  sheet.addRow({ name: "Sunita Devi", fileNumber: "OPD-3002", age: 30, gender: "Female", phone: "", referredBy: "", marketingPerson: "", visitType: "OPD", panel: "", idType: "", idNumber: "", forceType: "", wardType: "", creditAmount: "", submittedDate: "", dischargedDate: "" });
+  sheet.addRow({ name: "Ramesh Kumar", fileNumber: "IPD-3001", age: 45, gender: "Male", phone: "9876500000", referredBy: "Dr Niraj", marketingPerson: "Munesh Rana", visitType: "IPD", panel: "CGHS", idNumber: "12345678", forceType: "Pensioner", wardType: "Semi-Private Ward", creditAmount: "", admissionDate: "", dischargedDate: "" });
+  sheet.addRow({ name: "Sunita Devi", fileNumber: "OPD-3002", age: 30, gender: "Female", phone: "", referredBy: "", marketingPerson: "", visitType: "OPD", panel: "", idNumber: "", forceType: "", wardType: "", creditAmount: "", admissionDate: "", dischargedDate: "" });
 
   res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
   res.setHeader("Content-Disposition", "attachment; filename=referred-patients-bulk-import-template.xlsx");
@@ -283,15 +346,13 @@ router.post("/bulk-import", requireAuth, requireRole("ADMIN"), upload.single("fi
   const visitTypeCol = findCol("visit type", "visit", "type");
   const panelCol = findCol("panel");
   // Same fields the OCR card scan and the manual "Add patient" form capture — see
-  // Referral.idType/idNumber/forceType/wardType in schema.prisma. Free text on import, same
-  // as manual entry; not restricted to the OCR's five known card types, since a historical
-  // backfill row might reasonably say something else.
-  const idTypeCol = findCol("id type", "idtype", "card type");
+  // Referral.idNumber/forceType/wardType in schema.prisma. Free text on import, same as
+  // manual entry — always available regardless of card/panel type.
   const idNumberCol = findCol("id number", "idnumber", "card number", "id / card", "id/card");
   const forceTypeCol = findCol("force / category", "force/category", "force type", "forcetype", "force", "category");
   const wardTypeCol = findCol("ward type", "wardtype", "ward");
   const creditCol = findCol("credit amount", "credit", "amount");
-  const submittedCol = findCol("submitted date", "submitted", "date");
+  const submittedCol = findCol("admission date", "admission", "submitted date", "submitted", "date");
   const dischargedCol = findCol("discharged date", "discharge date", "discharged");
 
   if (!nameCol || !fileNoCol) {
@@ -396,16 +457,6 @@ router.post("/bulk-import", requireAuth, requireRole("ADMIN"), upload.single("fi
     const t = text.trim().toUpperCase();
     return t === "IPD" || t === "OPD" ? t : null;
   };
-  // Normalizes to the five known card types (matching the OCR scanner's CARD_TYPES) if it's
-  // a recognizable one, but doesn't reject anything else — a historical backfill row is
-  // manually-typed free text, same as the "Add patient" form allows.
-  const KNOWN_ID_TYPES = new Set(["AADHAAR", "AYUSHMAN", "CGHS", "ECHS", "CAPF"]);
-  const parseIdType = (text) => {
-    const t = text.trim();
-    if (!t) return null;
-    const upper = t.toUpperCase();
-    return KNOWN_ID_TYPES.has(upper) ? upper : t;
-  };
 
   // One row tying every referral created by this upload together, so the whole import can
   // be reviewed and undone as a unit later from "Import history" instead of row-by-row.
@@ -480,8 +531,7 @@ router.post("/bulk-import", requireAuth, requireRole("ADMIN"), upload.single("fi
       const patientGender = parseGender(getText(row, genderCol));
       const patientPhone = getText(row, phoneCol) || null;
       const visitType = parseVisitType(getText(row, visitTypeCol));
-      const panel = getText(row, panelCol) || null;
-      const idType = parseIdType(getText(row, idTypeCol));
+      const panel = normalizePanel(getText(row, panelCol));
       const idNumber = getText(row, idNumberCol) || null;
       const forceType = getText(row, forceTypeCol) || null;
       const wardType = getText(row, wardTypeCol) || null;
@@ -504,7 +554,6 @@ router.post("/bulk-import", requireAuth, requireRole("ADMIN"), upload.single("fi
           fileNumber,
           visitType,
           panel,
-          idType,
           idNumber,
           forceType,
           wardType,
@@ -678,19 +727,26 @@ router.patch("/:id/panel", requireAuth, requireAccess(["ADMIN", "RECEPTION"], ["
 // Fields an admin can fix up after the fact from the "All Referrals" table's inline edit —
 // deliberately a superset of what the manual-add form captures, since this is also how a
 // mistyped bulk-import row or a bad OCR read gets corrected later.
+// Fields an admin can fix up after the fact from the "All Referrals" table's inline edit —
+// deliberately a superset of what the manual-add form captures, since this is also how a
+// mistyped bulk-import row or a bad OCR read gets corrected later. "Referred by" (doctorId)
+// and Marketing Person are deliberately NOT editable here — the referring leader is fixed
+// once a referral exists, and Marketing Person is always derived from that leader, never
+// entered directly (see /referrals/manual).
 const referralEditSchema = z.object({
   patientName: z.string().min(1).optional(),
   patientAge: z.number().int().positive().max(130).optional(),
   patientGender: z.enum(["MALE", "FEMALE", "OTHER"]).optional(),
   patientPhone: z.string().nullable().optional(),
   fileNumber: z.string().nullable().optional(),
-  doctorId: z.string().uuid().optional(),
   panel: z.string().nullable().optional(),
-  idType: z.string().nullable().optional(),
   idNumber: z.string().nullable().optional(),
   forceType: z.string().nullable().optional(),
   wardType: z.string().nullable().optional(),
   visitType: z.enum(["IPD", "OPD"]).nullable().optional(),
+  admissionDate: z.string().nullable().optional(),
+  dischargedDate: z.string().nullable().optional(),
+  creditAmount: z.number().nonnegative().nullable().optional(),
 });
 
 // PATCH /api/referrals/:id  (admin + reception with MANAGE_REFERRALS) — full row edit from the
@@ -701,28 +757,47 @@ router.patch("/:id", requireAuth, requireAccess(["ADMIN", "RECEPTION"], ["MANAGE
 
   const referral = await prisma.referral.findFirst({
     where: { id: req.params.id, doctor: { hospitalId: req.user.hospitalId } },
+    include: { transaction: true },
   });
   if (!referral) return res.status(404).json({ error: "Referral not found" });
 
   const body = parsed.data;
   const data = {};
 
-  if (body.doctorId && body.doctorId !== referral.doctorId) {
-    // Re-scope to the same hospital so an admin can't reassign a referral to a leader
-    // outside their own hospital just by knowing/guessing an id.
-    const doctor = await prisma.doctor.findFirst({ where: { id: body.doctorId, hospitalId: req.user.hospitalId } });
-    if (!doctor) return res.status(400).json({ error: "Selected leader not found" });
-    data.doctorId = body.doctorId;
-  }
   for (const key of ["patientName", "patientAge", "patientGender"]) {
     if (body[key] !== undefined) data[key] = body[key];
   }
-  for (const key of ["patientPhone", "fileNumber", "panel", "idType", "idNumber", "forceType", "wardType", "visitType"]) {
+  for (const key of ["patientPhone", "fileNumber", "panel", "idNumber", "forceType", "wardType", "visitType"]) {
     if (body[key] === undefined) continue;
     data[key] = typeof body[key] === "string" ? (body[key].trim() || null) : body[key];
   }
+  if (body.admissionDate !== undefined) {
+    // "In:" on the All Referrals list is driven by createdAt, not arrivedAt (see the bulk-import
+    // and manual-add routes, which set both together for a one-step CREDITED entry) — so both
+    // need updating together for the edit to actually change what's shown. createdAt itself
+    // can't be nulled out (it's required), so clearing the date only clears arrivedAt.
+    if (body.admissionDate) {
+      data.createdAt = new Date(body.admissionDate);
+      data.arrivedAt = new Date(body.admissionDate);
+    } else {
+      data.arrivedAt = null;
+    }
+  }
+  if (body.dischargedDate !== undefined) data.dischargedAt = body.dischargedDate ? new Date(body.dischargedDate) : null;
 
-  if (Object.keys(data).length === 0) return res.status(400).json({ error: "No changes provided" });
+  if (body.creditAmount !== undefined) {
+    if (!referral.transaction) {
+      return res.status(400).json({ error: "This referral hasn't been credited yet, so there's no credit amount to edit." });
+    }
+    await prisma.creditTransaction.update({
+      where: { referralId: referral.id },
+      data: { amount: body.creditAmount },
+    });
+  }
+
+  if (Object.keys(data).length === 0 && body.creditAmount === undefined) {
+    return res.status(400).json({ error: "No changes provided" });
+  }
 
   const updated = await prisma.referral.update({
     where: { id: referral.id },
@@ -739,7 +814,12 @@ router.patch("/:id", requireAuth, requireAccess(["ADMIN", "RECEPTION"], ["MANAGE
     entityType: "Referral",
     entityId: referral.id,
     entityLabel: updated.patientName,
-    changes: diffFields(referral, updated, Object.keys(data)),
+    changes: {
+      ...diffFields(referral, updated, Object.keys(data)),
+      ...(body.creditAmount !== undefined && Number(referral.transaction?.amount) !== body.creditAmount
+        ? { creditAmount: { from: referral.transaction?.amount ?? null, to: body.creditAmount } }
+        : {}),
+    },
   });
 
   res.json(updated);
@@ -797,7 +877,6 @@ router.get("/export/excel", requireAuth, requireAccess(["ADMIN"], ["EXPORT_REPOR
     { header: "Resolved At", key: "arrivedAt", width: 20 },
     { header: "Discharged At", key: "dischargedAt", width: 20 },
     { header: "Panel", key: "panel", width: 26 },
-    { header: "ID Type", key: "idType", width: 12 },
     { header: "ID Number", key: "idNumber", width: 20 },
     { header: "Force / Category", key: "forceType", width: 18 },
     { header: "Ward Type", key: "wardType", width: 18 },
@@ -821,7 +900,6 @@ router.get("/export/excel", requireAuth, requireAccess(["ADMIN"], ["EXPORT_REPOR
       arrivedAt: r.arrivedAt ? formatDateTime(r.arrivedAt) : "",
       dischargedAt: r.dischargedAt ? formatDateTime(r.dischargedAt) : "",
       panel: r.panel || "",
-      idType: r.idType || "",
       idNumber: r.idNumber || "",
       forceType: r.forceType || "",
       wardType: r.wardType || "",
@@ -835,7 +913,6 @@ router.get("/export/excel", requireAuth, requireAccess(["ADMIN"], ["EXPORT_REPOR
 });
 
 // GET /api/referrals/export/pdf  (admin) — same filters, proper column-aligned table
-const PDF_ID_TYPE_LABELS = { AADHAAR: "Aadhaar", AYUSHMAN: "Ayushman", CGHS: "CGHS", ECHS: "ECHS", CAPF: "CAPF" };
 router.get("/export/pdf", requireAuth, requireAccess(["ADMIN"], ["EXPORT_REPORTS"]), async (req, res) => {
   const referrals = await prisma.referral.findMany({
     where: buildWhere(req),
@@ -901,11 +978,8 @@ router.get("/export/pdf", requireAuth, requireAccess(["ADMIN"], ["EXPORT_REPORTS
     const credit = r.transaction ? `${Number(r.transaction.amount).toFixed(2)} pts` : "-";
     let location = r.scanAddress || (r.scanLatitude != null ? `${r.scanLatitude.toFixed(4)}, ${r.scanLongitude.toFixed(4)}` : "Not shared");
     if (location.length > 40) location = location.slice(0, 37) + "...";
-    let idCard = "-";
-    if (r.idType) {
-      idCard = `${PDF_ID_TYPE_LABELS[r.idType] || r.idType}${r.idNumber ? `: ${r.idNumber}` : ""}`;
-      if (idCard.length > 28) idCard = idCard.slice(0, 25) + "...";
-    }
+    let idCard = r.idNumber || "-";
+    if (idCard.length > 28) idCard = idCard.slice(0, 25) + "...";
 
     const rowValues = [itemNumber, r.patientName, r.fileNumber || "-", r.patientGender || "-", r.patientAge, r.status, r.visitType || "-", credit, formatDate(r.createdAt), idCard, location];
     let x = startX;

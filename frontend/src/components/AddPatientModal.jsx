@@ -85,8 +85,12 @@ export default function AddPatientModal({ onClose, onAdded }) {
   const [patientAge, setPatientAge] = useState("");
   const [patientGender, setPatientGender] = useState("MALE");
   const [patientPhone, setPatientPhone] = useState("");
+  const [fileNumber, setFileNumber] = useState("");
+  const [visitType, setVisitType] = useState(""); // "" | "OPD" | "IPD" — blank means not yet known
+  const [creditAmount, setCreditAmount] = useState("");
+  const [admissionDate, setAdmissionDate] = useState("");
+  const [dischargedDate, setDischargedDate] = useState("");
   const [patientPanel, setPatientPanel] = useState("");
-  const [idType, setIdType] = useState("");
   const [idNumber, setIdNumber] = useState("");
   const [forceType, setForceType] = useState("");
   const [wardType, setWardType] = useState("");
@@ -108,14 +112,12 @@ export default function AddPatientModal({ onClose, onAdded }) {
   }, []);
 
   const CARD_LABELS = { AADHAAR: "Aadhaar", AYUSHMAN: "Ayushman", CGHS: "CGHS", ECHS: "ECHS", CAPF: "CAPF" };
-  const CARD_TYPE_OPTIONS = ["AADHAAR", "AYUSHMAN", "CGHS", "ECHS", "CAPF"];
 
   function handleScanExtracted(result) {
     if (result.patientName) setPatientName(result.patientName);
     if (result.patientAge) setPatientAge(String(result.patientAge));
     if (result.patientGender) setPatientGender(result.patientGender);
     if (result.panel) setPatientPanel(result.panel);
-    setIdType(result.cardType || "");
     setIdNumber(result.idNumberMasked || "");
     setForceType(result.forceType || "");
     setWardType(result.wardType || "");
@@ -135,6 +137,10 @@ export default function AddPatientModal({ onClose, onAdded }) {
       setError("Select who referred this patient, or type a new name.");
       return;
     }
+    if (Boolean(fileNumber.trim()) !== Boolean(visitType)) {
+      setError("Enter both File No. and Visit Type together, or leave both blank.");
+      return;
+    }
     setSubmitting(true);
     try {
       const payload = {
@@ -143,10 +149,14 @@ export default function AddPatientModal({ onClose, onAdded }) {
         patientGender,
         patientPhone: patientPhone.trim() || undefined,
         panel: patientPanel || undefined,
-        idType: idType || undefined,
         idNumber: idNumber.trim() || undefined,
         forceType: forceType.trim() || undefined,
         wardType: wardType.trim() || undefined,
+        fileNumber: fileNumber.trim() || undefined,
+        visitType: visitType || undefined,
+        creditAmount: creditAmount.trim() !== "" ? Number(creditAmount) : undefined,
+        admissionDate: admissionDate || undefined,
+        dischargedDate: dischargedDate || undefined,
         ...(referrer.mode === "existing" ? { doctorId: referrer.doctorId } : { newLeaderName: referrer.newLeaderName }),
       };
       const { data } = await api.post("/referrals/manual", payload);
@@ -201,41 +211,60 @@ export default function AddPatientModal({ onClose, onAdded }) {
         <label>Patient phone (optional)</label>
         <input value={patientPhone} onChange={(e) => setPatientPhone(e.target.value)} placeholder="e.g. 98765 43210" />
 
+        <label>Visit type (optional)</label>
+        <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
+          {["", "OPD", "IPD"].map((type) => (
+            <button
+              key={type || "unknown"}
+              type="button"
+              className={visitType === type ? "" : "secondary"}
+              style={{ width: "auto", flex: 1, padding: "8px 0" }}
+              onClick={() => setVisitType(type)}
+            >
+              {type || "Not yet known"}
+            </button>
+          ))}
+        </div>
+
+        <label>File No. (optional)</label>
+        <input value={fileNumber} onChange={(e) => setFileNumber(e.target.value)} placeholder={visitType ? `e.g. ${visitType}-00123` : "e.g. IPD-00123"} />
+        <p style={{ fontSize: 11.5, color: "var(--ink-soft)", marginTop: -6, marginBottom: 8 }}>
+          If you already know the file number and visit type, this patient is credited immediately instead of going through a separate "Confirm lead" step.
+        </p>
+
         <label>Panel (optional)</label>
         <select value={patientPanel} onChange={(e) => setPatientPanel(e.target.value)}>
           <option value="">— None —</option>
           {PANEL_OPTIONS.map((p) => <option key={p} value={p}>{p}</option>)}
         </select>
 
-        <label>ID / card type (optional)</label>
-        <select value={idType} onChange={(e) => setIdType(e.target.value)}>
-          <option value="">— None —</option>
-          {CARD_TYPE_OPTIONS.map((t) => <option key={t} value={t}>{CARD_LABELS[t]}</option>)}
-        </select>
-        <p style={{ fontSize: 11.5, color: "var(--ink-soft)", marginTop: -6, marginBottom: 8 }}>
-          Set automatically after a card scan — pick it here instead if you're entering details by hand.
-        </p>
+        <label>ID number (optional)</label>
+        <input value={idNumber} onChange={(e) => setIdNumber(e.target.value)} placeholder="Aadhaar, Ayushman, CGHS/ECHS/CAPF card number, etc." />
 
-        {idType === "AADHAAR" && (
+        <label>Force / category (optional)</label>
+        <input value={forceType} onChange={(e) => setForceType(e.target.value)} placeholder="e.g. Cash Patient, Ayushman Bharat, BSF, Pensioner" />
+
+        <label>Ward type (optional)</label>
+        <input value={wardType} onChange={(e) => setWardType(e.target.value)} placeholder="e.g. General Ward, Semi-Private Ward, ICU, NICU" />
+
+        {fileNumber.trim() && visitType && (
           <>
-            <label>Aadhaar number</label>
-            <input value={idNumber} onChange={(e) => setIdNumber(e.target.value)} placeholder="XXXX XXXX 1234" />
-          </>
-        )}
-        {idType === "AYUSHMAN" && (
-          <>
-            <label>Ayushman number</label>
-            <input value={idNumber} onChange={(e) => setIdNumber(e.target.value)} />
-          </>
-        )}
-        {(idType === "CGHS" || idType === "ECHS" || idType === "CAPF") && (
-          <>
-            <label>Force / category</label>
-            <input value={forceType} onChange={(e) => setForceType(e.target.value)} placeholder="e.g. BSF, ARMY, Pensioner" />
-            <label>Ward type</label>
-            <input value={wardType} onChange={(e) => setWardType(e.target.value)} placeholder="e.g. Semi-Private Ward" />
-            <label>Card number</label>
-            <input value={idNumber} onChange={(e) => setIdNumber(e.target.value)} />
+            <label>Credit amount (optional override)</label>
+            <input
+              type="number" min="0" step="0.01"
+              value={creditAmount}
+              onChange={(e) => setCreditAmount(e.target.value)}
+              placeholder={`Defaults to the hospital's ${visitType} amount`}
+            />
+
+            <label>Admission date (optional)</label>
+            <input type="datetime-local" value={admissionDate} onChange={(e) => setAdmissionDate(e.target.value)} />
+            <p style={{ fontSize: 11.5, color: "var(--ink-soft)", marginTop: -6, marginBottom: 8 }}>
+              Defaults to right now if left blank.
+            </p>
+
+            <label>Discharged date (optional)</label>
+            <input type="datetime-local" value={dischargedDate} onChange={(e) => setDischargedDate(e.target.value)} />
           </>
         )}
 
@@ -243,7 +272,7 @@ export default function AddPatientModal({ onClose, onAdded }) {
 
         <button type="submit" disabled={submitting || loadingLeaders} style={{ marginTop: 8 }}>
           <UserPlus size={16} />
-          {submitting ? "Adding…" : "Add patient"}
+          {submitting ? "Adding…" : fileNumber.trim() && visitType ? "Add & credit patient" : "Add patient"}
         </button>
       </form>
     </Modal>
