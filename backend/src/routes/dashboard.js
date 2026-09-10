@@ -9,6 +9,10 @@ const router = express.Router();
 // Marketing Emp", and "Pending redemptions" cards.
 const PERIODS = { week: 7, month: 30, "3months": 90, "6months": 180, year: 365 };
 
+// Windows shown side-by-side (not toggled) on the "Marketing employee comparison" table and
+// its pie charts, plus the per-slice referral drill-down below.
+const COMPARISON_PERIODS = { week: 7, fortnight: 14, month: 30, "3months": 90, "6months": 180 };
+
 function withinPeriod(date, days) {
   return new Date(date).getTime() >= Date.now() - days * 24 * 60 * 60 * 1000;
 }
@@ -162,7 +166,6 @@ router.get("/summary", requireAuth, requireRole("ADMIN"), async (req, res) => {
   // credit amount for each of 5 fixed windows as columns, all computed in a single pass over
   // referrals (rather than the once-per-period reduction the toggle cards above use) since
   // every period is shown at once here rather than picked one at a time.
-  const COMPARISON_PERIODS = { week: 7, fortnight: 14, month: 30, "3months": 90, "6months": 180 };
   const comparisonByPerson = new Map(
     marketingPersons.map((m) => [
       m.id,
@@ -204,6 +207,58 @@ router.get("/summary", requireAuth, requireRole("ADMIN"), async (req, res) => {
     marketingComparison,
     recentReferrals,
     pendingRedemptions,
+  });
+});
+
+// GET /api/dashboard/marketing-comparison/:marketingPersonId/referrals?period=week (admin
+// only) — drill-down for a slice of the "Marketing employee comparison" pie charts: every
+// referral brought in by leaders linked to this marketing person within the given window,
+// with enough per-patient detail (file number, admission date, credit status) to fill the
+// table that opens when a pie slice is clicked. Same period keys/windows as the comparison
+// table itself (COMPARISON_PERIODS above), so a slice and its drill-down always agree.
+router.get("/marketing-comparison/:marketingPersonId/referrals", requireAuth, requireRole("ADMIN"), async (req, res) => {
+  const days = COMPARISON_PERIODS[req.query.period];
+  if (!days) return res.status(400).json({ error: `period must be one of ${Object.keys(COMPARISON_PERIODS).join(", ")}` });
+
+  const hospitalId = req.user.hospitalId;
+  const marketingPerson = await prisma.marketingPerson.findFirst({
+    where: { id: req.params.marketingPersonId, hospitalId },
+  });
+  if (!marketingPerson) return res.status(404).json({ error: "Marketing employee not found" });
+
+  const cutoff = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+  const referrals = await prisma.referral.findMany({
+    where: {
+      createdAt: { gte: cutoff },
+      doctor: { hospitalId, marketingPersonId: marketingPerson.id },
+    },
+    select: {
+      id: true,
+      fileNumber: true,
+      patientName: true,
+      createdAt: true,
+      status: true,
+      transaction: { select: { amount: true, redeemed: true } },
+    },
+    orderBy: { createdAt: "desc" },
+  });
+
+  res.json({
+    marketingPersonId: marketingPerson.id,
+    marketingPersonName: marketingPerson.name,
+    period: req.query.period,
+    referrals: referrals.map((r) => ({
+      id: r.id,
+      fileNumber: r.fileNumber,
+      patientName: r.patientName,
+      doa: r.createdAt,
+      status: r.status,
+      // A referral only has a transaction once it's been credited. Split into "paid" vs
+      // "pending" here (rather than sending amount + redeemed and letting the frontend
+      // figure it out) since that's exactly the two columns the drill-down table needs.
+      paidAmount: r.transaction && r.transaction.redeemed ? Number(r.transaction.amount) : null,
+      pendingAmount: r.transaction && !r.transaction.redeemed ? Number(r.transaction.amount) : null,
+    })),
   });
 });
 

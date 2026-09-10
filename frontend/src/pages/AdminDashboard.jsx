@@ -6,7 +6,7 @@ import {
   XCircle, MapPin, X, ChevronUp, ChevronDown, ChevronLeft, ChevronRight,
   Eye, TrendingUp, IndianRupee, UserCheck, Clock, Award, ArrowUpCircle, RotateCcw, Upload, LogOut, UserPlus, Pencil, Megaphone, QrCode, History,
 } from "lucide-react";
-import { ResponsiveContainer, AreaChart, Area, XAxis, YAxis, Tooltip, CartesianGrid, BarChart, Bar, Cell } from "recharts";
+import { ResponsiveContainer, AreaChart, Area, XAxis, YAxis, Tooltip, CartesianGrid, BarChart, Bar, Cell, PieChart, Pie, Legend } from "recharts";
 import api from "../api/client";
 import { formatDate, formatDateTime, formatShortDate } from "../utils/date";
 import Sidebar from "../components/Sidebar";
@@ -23,6 +23,7 @@ import ImportHistoryModal from "../components/ImportHistoryModal";
 import EditLeaderModal from "../components/EditLeaderModal";
 import AddPatientModal from "../components/AddPatientModal";
 import EditReferralModal from "../components/EditReferralModal";
+import MarketingPersonReferralsModal from "../components/MarketingPersonReferralsModal";
 import { PANEL_OPTIONS } from "../utils/panels";
 import QrModal from "../components/QrModal";
 import MarketingPersonModal from "../components/MarketingPersonModal";
@@ -57,6 +58,13 @@ const DOCTORS_PAGE_SIZE = 8;
 const REFERRALS_PAGE_SIZE = 50;
 
 const DASHBOARD_PERIODS = [["week", "7D"], ["month", "30D"], ["3months", "3M"], ["6months", "6M"], ["year", "1Y"]];
+// One color per marketing employee, cycled by their fixed position in the comparison table —
+// so e.g. "Ashok Bhati" is the same color across all 5 pie charts, not reassigned per chart.
+const COMPARISON_PIE_COLORS = [
+  "#2563eb", "#16a34a", "#d97706", "#dc2626", "#7c3aed", "#0891b2",
+  "#c026d3", "#65a30d", "#e11d48", "#0d9488", "#9333ea", "#ca8a04",
+];
+const COMPARISON_PERIOD_LABELS = [["week", "Weekly"], ["fortnight", "Fortnightly"], ["month", "Monthly"], ["3months", "3 months"], ["6months", "6 months"]];
 
 // Small pill-style period switcher shared by the Top Doctors / Top Marketing Emp / Pending
 // Redemptions dashboard cards.
@@ -146,6 +154,7 @@ export default function AdminDashboard() {
   const [confirmModal, setConfirmModal] = useState(null); // referral being confirmed via IPD/OPD + file number
   const [convertModal, setConvertModal] = useState(null); // OPD referral being converted to IPD
   const [editReferralModal, setEditReferralModal] = useState(null); // referral being edited by admin
+  const [marketingDrilldown, setMarketingDrilldown] = useState(null); // { marketingPersonId, marketingPersonName, period } — pie slice clicked on "Marketing employee comparison"
   const [showAddPatient, setShowAddPatient] = useState(false);
 
   const [hospitalSettings, setHospitalSettings] = useState({ ipdAmount: 0, opdAmount: 0 });
@@ -901,6 +910,61 @@ export default function AdminDashboard() {
                 <div className="card">
                   <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
                     <Megaphone size={16} color="var(--teal-600)" />
+                    <h3 style={{ margin: 0 }}>Marketing employee comparison — by leads</h3>
+                  </div>
+                  <p style={{ fontSize: 12.5, color: "var(--ink-soft)", marginTop: 4, marginBottom: 12 }}>
+                    Each slice is one employee's share of leads in that window. Click a slice to see the patients behind it.
+                  </p>
+                  {(dashboardData.marketingComparison || []).length === 0 ? (
+                    <EmptyState icon={Megaphone} title="No marketing employees yet" subtitle="Add them from the Marketing Team tab" />
+                  ) : (
+                    <div style={{ display: "grid", gridTemplateColumns: "repeat(5, minmax(0, 1fr))", gap: 12 }}>
+                      {COMPARISON_PERIOD_LABELS.map(([periodKey, periodLabel]) => {
+                        const slices = dashboardData.marketingComparison
+                          .filter((m) => m.byPeriod[periodKey].leadsCount > 0)
+                          .map((m, i) => ({
+                            id: m.id,
+                            name: m.name,
+                            value: m.byPeriod[periodKey].leadsCount,
+                            amount: m.byPeriod[periodKey].amount,
+                            color: COMPARISON_PIE_COLORS[dashboardData.marketingComparison.findIndex((x) => x.id === m.id) % COMPARISON_PIE_COLORS.length],
+                          }));
+                        return (
+                          <div key={periodKey} style={{ textAlign: "center" }}>
+                            <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 4 }}>{periodLabel}</div>
+                            {slices.length === 0 ? (
+                              <div style={{ height: 170, display: "flex", alignItems: "center", justifyContent: "center", color: "var(--ink-soft)", fontSize: 12.5 }}>
+                                No leads yet
+                              </div>
+                            ) : (
+                              <ResponsiveContainer width="100%" height={170}>
+                                <PieChart>
+                                  <Pie
+                                    data={slices}
+                                    dataKey="value"
+                                    nameKey="name"
+                                    cx="50%"
+                                    cy="50%"
+                                    outerRadius={55}
+                                    onClick={(entry) => setMarketingDrilldown({ marketingPersonId: entry.id, marketingPersonName: entry.name, period: periodKey })}
+                                    style={{ cursor: "pointer" }}
+                                  >
+                                    {slices.map((s) => <Cell key={s.id} fill={s.color} />)}
+                                  </Pie>
+                                  <Tooltip formatter={(value, name, entry) => [`${value} lead${value !== 1 ? "s" : ""} · ${entry.payload.amount.toFixed(2)} pts`, name]} />
+                                </PieChart>
+                              </ResponsiveContainer>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+
+                <div className="card">
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
+                    <Megaphone size={16} color="var(--teal-600)" />
                     <h3 style={{ margin: 0 }}>Marketing employee comparison</h3>
                   </div>
                   <p style={{ fontSize: 12.5, color: "var(--ink-soft)", marginTop: 4, marginBottom: 12 }}>
@@ -1581,6 +1645,14 @@ export default function AdminDashboard() {
             setMessage("Referral updated.");
             loadReferrals();
           }}
+        />
+      )}
+      {marketingDrilldown && (
+        <MarketingPersonReferralsModal
+          marketingPersonId={marketingDrilldown.marketingPersonId}
+          marketingPersonName={marketingDrilldown.marketingPersonName}
+          period={marketingDrilldown.period}
+          onClose={() => setMarketingDrilldown(null)}
         />
       )}
 
