@@ -366,9 +366,22 @@ router.post("/bulk-import", requireAuth, requireRole("ADMIN"), upload.single("fi
     select: { ipdAmount: true, opdAmount: true },
   });
 
-  // Cache leaders by lowercased name so repeat names across rows don't re-query/re-create.
+  // Group existing leaders by lowercased name so a row can be matched by name first, then
+  // disambiguated by marketing person only when that name is genuinely shared by more than
+  // one real person (see below) — a shared first name, e.g. a generic field-agent name like
+  // "Pankaj", "Sachin", or "Vishal", is often reused by completely different marketing
+  // employees' own staff. Treating every same-named referrer as one shared leader would
+  // silently attribute one employee's patients to another's payout the moment the same name
+  // showed up twice under different Marketing Person values — exactly the bug reported from a
+  // real import where rows correctly listed different Marketing Person values but reused a
+  // referrer name, and all of them ended up locked to whichever one appeared first.
   const existingLeaders = await prisma.doctor.findMany({ where: { hospitalId: req.user.hospitalId } });
-  const leaderCache = new Map(existingLeaders.map((d) => [d.name.trim().toLowerCase(), d]));
+  const leadersByName = new Map(); // lowercased name -> Doctor[] (usually one, sometimes several once disambiguated)
+  for (const d of existingLeaders) {
+    const key = d.name.trim().toLowerCase();
+    if (!leadersByName.has(key)) leadersByName.set(key, []);
+    leadersByName.get(key).push(d);
+  }
   // "Self" placeholder leader(s), used when a row has no "Referred By" name — keyed by
   // marketing person rather than one single shared record. Marketing-person attribution lives
   // on the Doctor row (Doctor.marketingPersonId), not on the Referral itself, so collapsing
@@ -499,21 +512,46 @@ router.post("/bulk-import", requireAuth, requireRole("ADMIN"), upload.single("fi
         marketingPersonId = marketingPerson.id;
       }
 
-      // Resolve the referring leader: existing match, quick-create, or fall back to "Self".
+      // Resolve the referring leader: existing match (by name, disambiguated by marketing
+      // person when needed), quick-create, or fall back to "Self".
       const referredByText = getText(row, referredByCol);
       let doctor;
       if (referredByText) {
-        const key = referredByText.toLowerCase();
-        doctor = leaderCache.get(key);
-        if (!doctor) {
-          doctor = await prisma.doctor.create({ data: { name: referredByText, hospitalId: req.user.hospitalId, marketingPersonId } });
-          leaderCache.set(key, doctor);
-          newLeadersCreated += 1;
-        } else if (marketingPersonId && !doctor.marketingPersonId) {
-          // Leader already existed with no marketing person set — fill it in from this row.
-          // Never overwrites one already assigned, e.g. via the Leaders tab.
-          doctor = await prisma.doctor.update({ where: { id: doctor.id }, data: { marketingPersonId } });
-          leaderCache.set(key, doctor);
+        const nameKey = referredByText.toLowerCase();
+        const candidates = leadersByName.get(nameKey) || [];
+        if (!marketingPersonId) {
+          // No marketing person given for this row — nothing to disambiguate against, so
+          // match ANY existing leader with this name (or create one), same as always.
+          doctor = candidates[0];
+          if (!doctor) {
+            doctor = await prisma.doctor.create({ data: { name: referredByText, hospitalId: req.user.hospitalId, marketingPersonId: null } });
+            newLeadersCreated += 1;
+            candidates.push(doctor);
+            leadersByName.set(nameKey, candidates);
+          }
+        } else {
+          doctor = candidates.find((d) => d.marketingPersonId === marketingPersonId);
+          if (!doctor) {
+            // No leader by this name already scoped to this exact marketing person. Prefer
+            // filling in a candidate that has no marketing person set yet (the common case:
+            // one real, persistent leader whose Marketing Person is only sometimes filled in)
+            // over creating a new record.
+            const blank = candidates.find((d) => !d.marketingPersonId);
+            if (blank) {
+              doctor = await prisma.doctor.update({ where: { id: blank.id }, data: { marketingPersonId } });
+              candidates[candidates.indexOf(blank)] = doctor;
+            } else {
+              // Either no leader by this name exists yet, or every existing one already
+              // belongs to a DIFFERENT marketing person — the generic-field-agent-name
+              // collision case. Create a separate leader scoped to this specific marketing
+              // person rather than reusing (and silently misattributing under) an unrelated
+              // one that just happens to share a name.
+              doctor = await prisma.doctor.create({ data: { name: referredByText, hospitalId: req.user.hospitalId, marketingPersonId } });
+              newLeadersCreated += 1;
+              candidates.push(doctor);
+            }
+            leadersByName.set(nameKey, candidates);
+          }
         }
       } else {
         const selfKey = marketingPersonId || "none";
