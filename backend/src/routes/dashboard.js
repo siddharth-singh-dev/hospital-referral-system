@@ -61,7 +61,7 @@ router.get("/summary", requireAuth, requireRole("ADMIN"), async (req, res) => {
     prisma.referral.findMany({
       where: { doctor: { hospitalId } },
       select: {
-        id: true, patientName: true, patientAge: true, patientGender: true, status: true, createdAt: true,
+        id: true, patientName: true, patientAge: true, patientGender: true, status: true, createdAt: true, rejectedReason: true,
         doctor: { select: { id: true, name: true, clinicName: true, marketingPersonId: true } },
       },
       orderBy: { createdAt: "desc" },
@@ -191,6 +191,91 @@ router.get("/summary", requireAuth, requireRole("ADMIN"), async (req, res) => {
 
   const recentReferrals = referrals.slice(0, 30);
 
+  // Per-leader and per-marketing-employee performance: lead volume, credited/rejected counts,
+  // conversion rate, and the average credit size among referrals that DID convert. That last
+  // figure is deliberately not diluted by non-converting leads — conversion rate already
+  // covers that — so it answers a different question: "when this person's leads do convert,
+  // how big are they typically?" (lots of small Cash-panel patients vs. fewer, bigger
+  // insurance ones). All bucketed by the referral's own createdAt, same convention as the
+  // marketing comparison table above, and using the same PERIODS toggle as topDoctors/
+  // topMarketingPersons so the frontend can reuse one period-switcher component for all of it.
+  function performanceForPeriod(days, groupBy) {
+    const byEntity = {};
+    for (const r of referrals) {
+      if (!withinPeriod(r.createdAt, days)) continue;
+      let entity;
+      if (groupBy === "doctor") {
+        entity = { id: r.doctor.id, name: r.doctor.name, clinicName: r.doctor.clinicName };
+      } else {
+        const mpId = r.doctor.marketingPersonId;
+        if (!mpId || !marketingPersonMap.has(mpId)) continue;
+        entity = { id: mpId, name: marketingPersonMap.get(mpId).name };
+      }
+      if (!byEntity[entity.id]) byEntity[entity.id] = { ...entity, totalLeads: 0, credited: 0, rejected: 0, creditedAmount: 0 };
+      const row = byEntity[entity.id];
+      row.totalLeads += 1;
+      if (r.status === "CREDITED") {
+        row.credited += 1;
+        row.creditedAmount += creditAmountByReferralId.get(r.id) || 0;
+      } else if (r.status === "REJECTED") {
+        row.rejected += 1;
+      }
+    }
+    return Object.values(byEntity)
+      .map((row) => ({
+        id: row.id,
+        name: row.name,
+        clinicName: row.clinicName,
+        totalLeads: row.totalLeads,
+        credited: row.credited,
+        rejected: row.rejected,
+        conversionRate: row.totalLeads > 0 ? row.credited / row.totalLeads : 0,
+        rejectionRate: row.totalLeads > 0 ? row.rejected / row.totalLeads : 0,
+        avgCreditPerLead: row.credited > 0 ? row.creditedAmount / row.credited : null,
+      }))
+      .sort((a, b) => b.totalLeads - a.totalLeads)
+      .slice(0, 20);
+  }
+  const leaderPerformance = Object.fromEntries(Object.entries(PERIODS).map(([key, days]) => [key, performanceForPeriod(days, "doctor")]));
+  const marketingPerformance = Object.fromEntries(Object.entries(PERIODS).map(([key, days]) => [key, performanceForPeriod(days, "marketing")]));
+
+  // Top rejection reasons, normalized by trimming/case-folding so e.g. "Wrong number" and
+  // "wrong number " don't split into separate buckets — the reject action is a free-text
+  // browser prompt() with no fixed list, so without this every minor typo would count as its
+  // own reason. Each normalized bucket displays using whichever exact original casing was
+  // typed most often for it, and carries the individual referrals behind it (leader,
+  // marketing employee, patient) so a reason can be traced back to whose lead it was.
+  function rejectionReasonsForPeriod(days) {
+    const buckets = new Map(); // normalized text -> { count, labelCounts: Map<original label, count>, referrals: [] }
+    for (const r of referrals) {
+      if (r.status !== "REJECTED" || !withinPeriod(r.createdAt, days)) continue;
+      const raw = (r.rejectedReason || "").trim();
+      const normalized = raw ? raw.toLowerCase().replace(/\s+/g, " ") : "";
+      const label = raw || "No reason given";
+      if (!buckets.has(normalized)) buckets.set(normalized, { count: 0, labelCounts: new Map(), referrals: [] });
+      const bucket = buckets.get(normalized);
+      bucket.count += 1;
+      bucket.labelCounts.set(label, (bucket.labelCounts.get(label) || 0) + 1);
+      const mpId = r.doctor.marketingPersonId;
+      bucket.referrals.push({
+        id: r.id,
+        patientName: r.patientName,
+        leaderName: r.doctor.name,
+        marketingPersonName: mpId && marketingPersonMap.has(mpId) ? marketingPersonMap.get(mpId).name : null,
+        createdAt: r.createdAt,
+      });
+    }
+    return Array.from(buckets.values())
+      .map((bucket) => ({
+        reason: Array.from(bucket.labelCounts.entries()).sort((a, b) => b[1] - a[1])[0][0],
+        count: bucket.count,
+        referrals: bucket.referrals.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt)),
+      }))
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 10);
+  }
+  const rejectionReasons = Object.fromEntries(Object.entries(PERIODS).map(([key, days]) => [key, rejectionReasonsForPeriod(days)]));
+
   res.json({
     kpis: {
       totalDoctors,
@@ -207,6 +292,9 @@ router.get("/summary", requireAuth, requireRole("ADMIN"), async (req, res) => {
     marketingComparison,
     recentReferrals,
     pendingRedemptions,
+    leaderPerformance,
+    marketingPerformance,
+    rejectionReasons,
   });
 });
 

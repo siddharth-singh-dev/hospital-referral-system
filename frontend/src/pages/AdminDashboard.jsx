@@ -107,6 +107,10 @@ export default function AdminDashboard() {
   const [doctorsPeriod, setDoctorsPeriod] = useState("month");
   const [marketingPeriod, setMarketingPeriod] = useState("month");
   const [redemptionsPeriod, setRedemptionsPeriod] = useState("month");
+  const [performancePeriod, setPerformancePeriod] = useState("month");
+  const [performanceView, setPerformanceView] = useState("doctor"); // "doctor" | "marketing"
+  const [showComparisonTable, setShowComparisonTable] = useState(false);
+  const [expandedRejectionReason, setExpandedRejectionReason] = useState(null); // normalized reason text currently expanded
   const [expandedPendingDoctorId, setExpandedPendingDoctorId] = useState(null);
   const [dashboardLoading, setDashboardLoading] = useState(false);
 
@@ -907,6 +911,123 @@ export default function AdminDashboard() {
                   </div>
                 </div>
 
+                <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 2fr) minmax(0, 1fr)", gap: 20, marginBottom: 20 }}>
+                  <div className="card">
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 4, flexWrap: "wrap" }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                        <TrendingUp size={16} color="var(--teal-600)" />
+                        <h3 style={{ margin: 0 }}>Conversion & credit quality</h3>
+                      </div>
+                      <PeriodToggle value={performancePeriod} onChange={setPerformancePeriod} />
+                    </div>
+                    <p style={{ fontSize: 12.5, color: "var(--ink-soft)", marginTop: 4, marginBottom: 10 }}>
+                      Of the leads brought in, how many convert to credited patients — and when they do, how big are they typically.
+                    </p>
+                    <div style={{ display: "flex", gap: 2, background: "var(--teal-50)", borderRadius: 8, padding: 2, width: "fit-content", marginBottom: 12 }}>
+                      {[["doctor", "Leaders"], ["marketing", "Marketing employees"]].map(([key, label]) => (
+                        <button
+                          key={key}
+                          type="button"
+                          onClick={() => setPerformanceView(key)}
+                          style={{
+                            width: "auto", padding: "4px 10px", fontSize: 12, fontWeight: 600, border: "none",
+                            borderRadius: 6, cursor: "pointer",
+                            background: performanceView === key ? "var(--teal-600)" : "transparent",
+                            color: performanceView === key ? "#fff" : "var(--ink-soft)",
+                          }}
+                        >
+                          {label}
+                        </button>
+                      ))}
+                    </div>
+                    {(() => {
+                      const rows = (performanceView === "doctor" ? dashboardData.leaderPerformance : dashboardData.marketingPerformance)?.[performancePeriod] || [];
+                      return rows.length === 0 ? (
+                        <EmptyState icon={TrendingUp} title="No leads in this period" />
+                      ) : (
+                        <div className="table-wrap" style={{ maxHeight: 340, overflowY: "auto" }}>
+                          <table>
+                            <thead>
+                              <tr>
+                                <th>{performanceView === "doctor" ? "Leader" : "Marketing employee"}</th>
+                                <th>Leads</th>
+                                <th>Credited</th>
+                                <th>Conversion</th>
+                                <th>Avg credit/lead</th>
+                                <th>Rejected</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {rows.map((row) => (
+                                <tr key={row.id}>
+                                  <td>
+                                    <div style={{ fontWeight: 600 }}>{row.name}</div>
+                                    {row.clinicName && <div style={{ fontSize: 11.5, color: "var(--ink-soft)" }}>{row.clinicName}</div>}
+                                  </td>
+                                  <td>{row.totalLeads}</td>
+                                  <td>{row.credited}</td>
+                                  <td style={{ fontWeight: 600, color: row.conversionRate >= 0.5 ? "var(--teal-700)" : "var(--ink)" }}>
+                                    {(row.conversionRate * 100).toFixed(0)}%
+                                  </td>
+                                  <td>{row.avgCreditPerLead != null ? `${row.avgCreditPerLead.toFixed(2)} pts` : "—"}</td>
+                                  <td style={{ color: row.rejectionRate > 0.2 ? "#b91c1c" : "var(--ink-soft)" }}>
+                                    {row.rejected} {row.totalLeads > 0 ? `(${(row.rejectionRate * 100).toFixed(0)}%)` : ""}
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      );
+                    })()}
+                  </div>
+
+                  <div className="card">
+                    <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
+                      <XCircle size={16} color="#b91c1c" />
+                      <h3 style={{ margin: 0 }}>Top rejection reasons</h3>
+                    </div>
+                    <p style={{ fontSize: 12.5, color: "var(--ink-soft)", marginTop: 4, marginBottom: 12 }}>
+                      Same window as the table on the left ({DASHBOARD_PERIODS.find(([k]) => k === performancePeriod)?.[1]}).
+                    </p>
+                    {(dashboardData.rejectionReasons?.[performancePeriod] || []).length === 0 ? (
+                      <EmptyState icon={XCircle} title="No rejections in this period" />
+                    ) : (
+                      <div style={{ maxHeight: 340, overflowY: "auto" }}>
+                        {dashboardData.rejectionReasons[performancePeriod].map((r, i) => {
+                          const isOpen = expandedRejectionReason === r.reason;
+                          return (
+                            <div key={i} style={{ borderBottom: i < dashboardData.rejectionReasons[performancePeriod].length - 1 ? "1px solid var(--border)" : "none" }}>
+                              <div
+                                onClick={() => setExpandedRejectionReason(isOpen ? null : r.reason)}
+                                style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, padding: "8px 4px", cursor: "pointer" }}
+                              >
+                                <span style={{ fontSize: 13.5 }}>{r.reason}</span>
+                                <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                                  <span style={{ fontWeight: 700, color: "#b91c1c", whiteSpace: "nowrap" }}>{r.count}</span>
+                                  {isOpen ? <ChevronUp size={14} color="var(--ink-soft)" /> : <ChevronDown size={14} color="var(--ink-soft)" />}
+                                </span>
+                              </div>
+                              {isOpen && (
+                                <div style={{ paddingLeft: 8, paddingBottom: 8 }}>
+                                  {r.referrals.map((ref) => (
+                                    <div key={ref.id} style={{ padding: "5px 4px", fontSize: 12.5, borderTop: "1px dashed var(--border)" }}>
+                                      <div style={{ color: "var(--ink)" }}>{ref.patientName}</div>
+                                      <div style={{ color: "var(--ink-soft)" }}>
+                                        via {ref.leaderName}{ref.marketingPersonName ? ` · ${ref.marketingPersonName}` : ""} · {formatDate(ref.createdAt)}
+                                      </div>
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                </div>
+
                 <div className="card">
                   <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
                     <Megaphone size={16} color="var(--teal-600)" />
@@ -963,43 +1084,51 @@ export default function AdminDashboard() {
                 </div>
 
                 <div className="card">
-                  <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
-                    <Megaphone size={16} color="var(--teal-600)" />
-                    <h3 style={{ margin: 0 }}>Marketing employee comparison</h3>
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 4, flexWrap: "wrap" }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                      <Megaphone size={16} color="var(--teal-600)" />
+                      <h3 style={{ margin: 0 }}>Marketing employee comparison</h3>
+                    </div>
+                    <button className="secondary" style={{ width: "auto", padding: "6px 12px", fontSize: 12.5 }} onClick={() => setShowComparisonTable((v) => !v)}>
+                      {showComparisonTable ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+                      {showComparisonTable ? "Hide full table" : "Show full table"}
+                    </button>
                   </div>
                   <p style={{ fontSize: 12.5, color: "var(--ink-soft)", marginTop: 4, marginBottom: 12 }}>
                     Leads and credit points per employee, side by side across every window at once.
                   </p>
-                  {(dashboardData.marketingComparison || []).length === 0 ? (
-                    <EmptyState icon={Megaphone} title="No marketing employees yet" subtitle="Add them from the Marketing Team tab" />
-                  ) : (
-                    <div className="table-wrap">
-                      <table>
-                        <thead>
-                          <tr>
-                            <th>Marketing employee</th>
-                            <th>Weekly</th>
-                            <th>Fortnightly</th>
-                            <th>Monthly</th>
-                            <th>3 Months</th>
-                            <th>6 Months</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {dashboardData.marketingComparison.map((m) => (
-                            <tr key={m.id}>
-                              <td style={{ fontWeight: 600 }}>{m.name}</td>
-                              {["week", "fortnight", "month", "3months", "6months"].map((key) => (
-                                <td key={key}>
-                                  <div>{m.byPeriod[key].leadsCount} lead{m.byPeriod[key].leadsCount !== 1 ? "s" : ""}</div>
-                                  <div style={{ fontSize: 12, color: "var(--ink-soft)" }}>{m.byPeriod[key].amount.toFixed(2)} pts</div>
-                                </td>
-                              ))}
+                  {showComparisonTable && (
+                    (dashboardData.marketingComparison || []).length === 0 ? (
+                      <EmptyState icon={Megaphone} title="No marketing employees yet" subtitle="Add them from the Marketing Team tab" />
+                    ) : (
+                      <div className="table-wrap">
+                        <table>
+                          <thead>
+                            <tr>
+                              <th>Marketing employee</th>
+                              <th>Weekly</th>
+                              <th>Fortnightly</th>
+                              <th>Monthly</th>
+                              <th>3 Months</th>
+                              <th>6 Months</th>
                             </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
+                          </thead>
+                          <tbody>
+                            {dashboardData.marketingComparison.map((m) => (
+                              <tr key={m.id}>
+                                <td style={{ fontWeight: 600 }}>{m.name}</td>
+                                {["week", "fortnight", "month", "3months", "6months"].map((key) => (
+                                  <td key={key}>
+                                    <div>{m.byPeriod[key].leadsCount} lead{m.byPeriod[key].leadsCount !== 1 ? "s" : ""}</div>
+                                    <div style={{ fontSize: 12, color: "var(--ink-soft)" }}>{m.byPeriod[key].amount.toFixed(2)} pts</div>
+                                  </td>
+                                ))}
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )
                   )}
                 </div>
               </>
