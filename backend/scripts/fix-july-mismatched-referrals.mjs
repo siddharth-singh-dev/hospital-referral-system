@@ -48,7 +48,10 @@ async function main() {
 
     const hospitalId = referral.doctor.hospitalId;
     const marketingPerson = await prisma.marketingPerson.findFirst({
-      where: { hospitalId, name: { equals: fix.correctMarketingPerson, mode: "insensitive" } },
+      // MySQL's default collation already compares strings case-insensitively, so a plain
+      // `equals` is enough here — Prisma's `mode: "insensitive"` filter isn't supported on
+      // MySQL (only Postgres/MongoDB) and would throw a validation error if added back.
+      where: { hospitalId, name: { equals: fix.correctMarketingPerson } },
     });
     if (!marketingPerson) {
       console.log(`SKIP ${fix.fileNumber}: marketing employee "${fix.correctMarketingPerson}" not found`);
@@ -56,7 +59,7 @@ async function main() {
     }
 
     let correctDoctor = await prisma.doctor.findFirst({
-      where: { hospitalId, name: { equals: fix.referredByName, mode: "insensitive" }, marketingPersonId: marketingPerson.id },
+      where: { hospitalId, name: { equals: fix.referredByName }, marketingPersonId: marketingPerson.id },
     });
 
     if (referral.doctorId === correctDoctor?.id) {
