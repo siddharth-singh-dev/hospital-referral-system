@@ -15,7 +15,12 @@ export default defineConfig({
         name: "Vedansh Medicare — Lead Platform",
         short_name: "VM Leads",
         description: "Referral and lead management for Vedansh Medicare",
-        start_url: "/",
+        // Deliberately no start_url here. Per the manifest spec, omitting it means the
+        // browser falls back to the URL that was open when "Add to Home Screen" happened —
+        // which matters a lot for this app, since a marketing person or leader installs from
+        // their own personal deep link (/marketing/:id, /refer/:doctorCode), not from "/".
+        // A hardcoded start_url would send every install to the same page regardless of
+        // whose link they installed from.
         display: "standalone",
         background_color: "#ffffff",
         theme_color: "#1f9dae",
