@@ -14,6 +14,22 @@ import ocrRoutes from "./routes/ocr.js";
 
 const app = express();
 
+// This is a live operational API — every response reflects real-time patient/credit/payout
+// status, so a stale response is actively misleading, never just a minor inefficiency.
+// Express generates an ETag for every response by default, which is normally a nice
+// performance win for static-ish content — but it actively works against an app like this:
+// the browser sends a conditional request next time, and if the freshly-computed response
+// happens to hash the same as last time (or the browser's own heuristics decide to reuse a
+// cached copy), the user silently sees old data with no visual indication anything was
+// skipped. This is exactly what caused referrals with an unpaid credit to disappear from the
+// "All Referrals" list for one admin's browser while the underlying data was always correct.
+// Disabling etag + explicitly marking every response no-store closes that off entirely.
+app.set("etag", false);
+app.use((req, res, next) => {
+  res.set("Cache-Control", "no-store");
+  next();
+});
+
 const allowedOrigins = (process.env.ALLOWED_ORIGINS || "").split(",").map((s) => s.trim());
 app.use(
   cors({
