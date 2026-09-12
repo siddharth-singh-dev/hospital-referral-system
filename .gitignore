@@ -21,6 +21,7 @@ npm-debug.log*
 
 # Vite
 dist/
+dev-dist/
 
 # Uploaded referral attachments (patient ID/insurance card photos, prescriptions) — real
 # patient data, never belongs in git.
