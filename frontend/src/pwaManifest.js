@@ -6,23 +6,32 @@
 // "/" (the staff login page) instead of back to their own page.
 //
 // The fix: fetch the static manifest, patch its start_url to the current page's path, then
-// swap the <link rel="manifest"> tag over to a Blob URL containing that patched copy. This
-// runs on every page load, well before a user could tap "Add to Home Screen" or Android's
-// install prompt, so by the time either happens, the manifest the browser reads already
-// points back to whichever page is currently open.
+// swap the <link rel="manifest"> tag over to a Blob URL containing that patched copy.
+//
+// This has to happen SYNCHRONOUSLY. An earlier version used a normal async fetch() here, and
+// it lost the race in practice: Chrome/Android can read the manifest for "Add to Home
+// Screen" eligibility very soon after the page loads, and on a real device the async fetch
+// sometimes hadn't resolved yet by the time that happened — so the install still captured
+// the original static manifest with start_url "/". A deliberately blocking XHR (on a same-
+// origin file well under 1KB, effectively instant on any real connection) closes that race:
+// by the time this script's next line runs, the link tag is already pointing at the patched
+// manifest, well before Chrome evaluates it for installability.
 export function patchManifestStartUrl() {
   const link = document.querySelector('link[rel="manifest"]');
   if (!link) return;
 
-  fetch(link.href)
-    .then((res) => res.json())
-    .then((manifest) => {
-      manifest.start_url = window.location.pathname + window.location.search;
-      const blob = new Blob([JSON.stringify(manifest)], { type: "application/manifest+json" });
-      link.setAttribute("href", URL.createObjectURL(blob));
-    })
-    .catch(() => {
-      // If this fails for any reason, the static manifest (start_url "/") is still in
-      // place — worse UX for a fresh install, but never a broken one.
-    });
+  try {
+    const xhr = new XMLHttpRequest();
+    xhr.open("GET", link.href, false); // false = synchronous, deliberately
+    xhr.send(null);
+    if (xhr.status !== 200) return;
+
+    const manifest = JSON.parse(xhr.responseText);
+    manifest.start_url = window.location.pathname + window.location.search;
+    const blob = new Blob([JSON.stringify(manifest)], { type: "application/manifest+json" });
+    link.setAttribute("href", URL.createObjectURL(blob));
+  } catch {
+    // If this fails for any reason, the static manifest (start_url "/") is still in
+    // place — worse UX for a fresh install, but never a broken one.
+  }
 }
