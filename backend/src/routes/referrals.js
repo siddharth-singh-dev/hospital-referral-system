@@ -907,7 +907,14 @@ router.get("/", requireAuth, requireAccess(["ADMIN", "RECEPTION"], ["VIEW_REFERR
         doctor: { select: { name: true, clinicName: true, phone: true, creditAmount: true, marketingPerson: { select: { id: true, name: true } } } },
         transaction: { select: { id: true, amount: true, redeemed: true, redeemedAt: true } },
       },
-      orderBy: { createdAt: "desc" },
+      // createdAt alone isn't unique — bulk imports routinely give many rows the exact same
+      // timestamp (e.g. a batch of patients sharing one admission date). Without a tiebreaker,
+      // MySQL doesn't guarantee a stable order for those ties across separate paginated
+      // queries, which silently drops some rows between pages (they land on neither page,
+      // even though a direct, non-paginated search still finds them fine) and can duplicate
+      // others. `id` is always unique, so adding it as a secondary sort key makes the order
+      // fully deterministic no matter how many rows share a createdAt.
+      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
       skip: (page - 1) * pageSize,
       take: pageSize,
     }),

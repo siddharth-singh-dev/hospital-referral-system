@@ -56,7 +56,11 @@ router.get("/", requireAuth, requireRole("ADMIN"), async (req, res) => {
     prisma.activityLog.count({ where }),
     prisma.activityLog.findMany({
       where,
-      orderBy: { createdAt: "desc" },
+      // See the same fix in referrals.js's list route — createdAt alone isn't unique (log
+      // entries written in a tight loop, e.g. during a bulk import, can share the exact same
+      // timestamp), so pagination needs a secondary, always-unique tiebreaker to avoid
+      // silently skipping or duplicating rows across pages.
+      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
       skip: (page - 1) * PAGE_SIZE,
       take: PAGE_SIZE,
     }),
