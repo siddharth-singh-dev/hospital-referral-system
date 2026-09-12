@@ -22,6 +22,10 @@ npm-debug.log*
 # Vite
 dist/
 
+# Uploaded referral attachments (patient ID/insurance card photos, prescriptions) — real
+# patient data, never belongs in git.
+backend/uploads/
+
 # macOS
 .DS_Store
 

@@ -212,6 +212,14 @@ model Referral {
   importBatchId   String?
   importBatch     ImportBatch?   @relation(fields: [importBatchId], references: [id])
 
+  // A supporting image uploaded alongside the referral — a photo of an ID/insurance card, a
+  // prescription, anything the submitter wants attached as proof of the lead. Currently only
+  // settable when a marketing employee submits a lead through their own portal (see
+  // POST /referrals/marketing-submit); stores a path served back via the authenticated
+  // GET /referrals/:id/attachment route, never a public URL, since these are often photos of
+  // ID documents. Null for every other referral-creation path.
+  attachmentPath  String?
+
   createdAt       DateTime       @default(now())
 
   transaction     CreditTransaction?

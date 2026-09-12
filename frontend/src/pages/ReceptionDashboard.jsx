@@ -7,6 +7,7 @@ import DateRangePicker from "../components/DateRangePicker";
 import ConfirmLeadModal from "../components/ConfirmLeadModal";
 import ConvertToIpdModal from "../components/ConvertToIpdModal";
 import AddPatientModal from "../components/AddPatientModal";
+import AttachmentIcon from "../components/AttachmentIcon";
 import { PANEL_OPTIONS } from "../utils/panels";
 
 const PAGE_SIZE = 10;
@@ -191,7 +192,7 @@ export default function ReceptionDashboard() {
             <tbody>
               {referrals.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE).map((r) => (
                 <tr key={r.id}>
-                  <td>{r.patientName}</td>
+                  <td>{r.patientName}{r.attachmentPath && <AttachmentIcon referralId={r.id} />}</td>
                   <td>{r.fileNumber || "—"}</td>
                   <td>{r.patientAge}</td>
                   <td>{r.patientGender ? r.patientGender.charAt(0) + r.patientGender.slice(1).toLowerCase() : "—"}</td>

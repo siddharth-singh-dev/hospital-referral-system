@@ -4,6 +4,10 @@ import rateLimit from "express-rate-limit";
 import ExcelJS from "exceljs";
 import PDFDocument from "pdfkit";
 import multer from "multer";
+import fs from "fs";
+import path from "path";
+import { fileURLToPath } from "url";
+import { randomUUID } from "crypto";
 import prisma from "../utils/prismaClient.js";
 import { requireAuth, requireRole, requireAccess } from "../middleware/auth.js";
 import { startOfIstDay, istDayBounds } from "../utils/istDate.js";
@@ -12,6 +16,30 @@ import { logActivity, diffFields, ACTIONS } from "../utils/activityLog.js";
 import { normalizePanel } from "../utils/panels.js";
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024 } });
+
+// Referral attachments (a photo of an ID/insurance card, a prescription, etc.) are saved to
+// disk rather than the database — these are images, sometimes several MB, and don't belong
+// in SQL rows. Stored outside the served /public path since they're never meant to be
+// reachable by a guessable URL; the only way to read one back is the authenticated
+// GET /:id/attachment route further down, which checks the requester actually has a reason
+// to see this particular referral before streaming the file.
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const ATTACHMENTS_DIR = path.join(__dirname, "..", "..", "uploads", "referral-attachments");
+fs.mkdirSync(ATTACHMENTS_DIR, { recursive: true });
+const uploadAttachment = multer({
+  storage: multer.diskStorage({
+    destination: ATTACHMENTS_DIR,
+    filename: (req, file, cb) => {
+      const ext = path.extname(file.originalname || "").slice(0, 10) || "";
+      cb(null, `${randomUUID()}${ext}`);
+    },
+  }),
+  limits: { fileSize: 8 * 1024 * 1024 },
+  fileFilter: (req, file, cb) => {
+    const allowed = ["image/jpeg", "image/png", "image/webp", "image/heic", "image/heif", "application/pdf"];
+    cb(null, allowed.includes(file.mimetype));
+  },
+});
 
 const router = express.Router();
 
@@ -1349,6 +1377,95 @@ router.delete("/:id", requireAuth, requireRole("ADMIN"), async (req, res) => {
   });
 
   res.json({ message: "Patient removed" });
+});
+
+// POST /api/referrals/marketing-submit  (marketing person's own portal only) — a marketing
+// employee submits a lead directly, on behalf of one of their own leaders. Always lands as
+// PENDING, same as a leader's own QR-code submission — nothing here skips the usual
+// confirm/credit flow. multipart/form-data so an optional supporting image (ID card,
+// prescription, whatever proof they want attached) can come along in the same request.
+router.post("/marketing-submit", requireAuth, requireRole("MARKETING"), uploadAttachment.single("attachment"), async (req, res) => {
+  const body = req.body || {};
+  const patientName = (body.patientName || "").trim();
+  const patientAge = Number(body.patientAge);
+  const patientGender = body.patientGender;
+  const leaderId = (body.leaderId || "").trim();
+  const newLeaderName = (body.newLeaderName || "").trim();
+
+  if (!patientName) return res.status(400).json({ error: "Patient name is required" });
+  if (!Number.isInteger(patientAge) || patientAge <= 0 || patientAge > 130) {
+    return res.status(400).json({ error: "A valid patient age is required" });
+  }
+  if (!["MALE", "FEMALE", "OTHER"].includes(patientGender)) {
+    return res.status(400).json({ error: "Patient gender is required" });
+  }
+  if (!leaderId && !newLeaderName) {
+    return res.status(400).json({ error: "Tell us which leader passed you this lead — pick one from your list or type a new name" });
+  }
+
+  let doctor;
+  if (leaderId) {
+    // Must actually be one of THIS marketing person's own leaders — never trust a raw id from
+    // the client to reach into someone else's leader list.
+    doctor = await prisma.doctor.findFirst({ where: { id: leaderId, marketingPersonId: req.user.marketingPersonId } });
+    if (!doctor) return res.status(404).json({ error: "That leader wasn't found in your list" });
+  } else {
+    doctor = await prisma.doctor.create({
+      data: { name: newLeaderName, hospitalId: req.user.hospitalId, marketingPersonId: req.user.marketingPersonId },
+    });
+  }
+
+  const referral = await prisma.referral.create({
+    data: {
+      doctorId: doctor.id,
+      patientName,
+      patientAge,
+      patientGender,
+      patientPhone: body.patientPhone?.trim() || null,
+      panel: normalizePanel(body.panel),
+      idNumber: body.idNumber?.trim() || null,
+      forceType: body.forceType?.trim() || null,
+      wardType: body.wardType?.trim() || null,
+      attachmentPath: req.file ? path.basename(req.file.path) : null,
+    },
+  });
+
+  logActivity({
+    actor: req.user,
+    action: ACTIONS.REFERRAL_SUBMITTED_BY_MARKETING,
+    entityType: "Referral",
+    entityId: referral.id,
+    entityLabel: patientName,
+    metadata: { doctorId: doctor.id, doctorName: doctor.name, newLeaderCreated: !leaderId, hadAttachment: Boolean(req.file) },
+  });
+
+  res.status(201).json({ message: "Lead submitted — it'll show up as Pending until reception confirms it.", referralId: referral.id, doctorName: doctor.name });
+});
+
+// GET /api/referrals/:id/attachment — streams back the supporting image/PDF uploaded with a
+// referral. Reachable by hospital staff who can already see referral lists (ADMIN/RECEPTION,
+// or a custom STAFF role with VIEW_REFERRALS/MANAGE_REFERRALS), or by the specific marketing
+// employee whose own leader this referral belongs to — never anyone else, since these are
+// often photos of ID documents.
+router.get("/:id/attachment", requireAuth, async (req, res) => {
+  const referral = await prisma.referral.findUnique({
+    where: { id: req.params.id },
+    include: { doctor: { select: { hospitalId: true, marketingPersonId: true } } },
+  });
+  if (!referral || !referral.attachmentPath) return res.status(404).json({ error: "No attachment for this referral" });
+
+  const staffPerms = req.user.permissions || [];
+  const isStaffWithAccess =
+    ["ADMIN", "RECEPTION"].includes(req.user.role) ||
+    (req.user.role === "STAFF" && ["VIEW_REFERRALS", "MANAGE_REFERRALS"].some((p) => staffPerms.includes(p)));
+  const staffOk = isStaffWithAccess && req.user.hospitalId === referral.doctor.hospitalId;
+  const marketingOk = req.user.role === "MARKETING" && req.user.marketingPersonId === referral.doctor.marketingPersonId;
+
+  if (!staffOk && !marketingOk) return res.status(403).json({ error: "Not authorized to view this attachment" });
+
+  const filePath = path.join(ATTACHMENTS_DIR, path.basename(referral.attachmentPath));
+  if (!fs.existsSync(filePath)) return res.status(404).json({ error: "Attachment file is missing" });
+  res.sendFile(filePath);
 });
 
 export default router;

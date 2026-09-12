@@ -5,6 +5,7 @@ import prisma from "./prismaClient.js";
 // Activity Log UI's filter dropdown and any future reporting can rely on a fixed vocabulary.
 export const ACTIONS = {
   REFERRAL_SUBMITTED: "referral.submitted",       // patient submitted via public QR/link
+  REFERRAL_SUBMITTED_BY_MARKETING: "referral.submitted_by_marketing", // marketing employee submitted a lead through their own portal
   REFERRAL_ADDED_MANUALLY: "referral.added_manually",
   REFERRAL_BULK_IMPORTED: "referral.bulk_imported",
   REFERRAL_BULK_IMPORT_REVERTED: "referral.bulk_import_reverted",

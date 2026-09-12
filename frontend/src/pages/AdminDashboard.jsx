@@ -24,6 +24,7 @@ import EditLeaderModal from "../components/EditLeaderModal";
 import AddPatientModal from "../components/AddPatientModal";
 import EditReferralModal from "../components/EditReferralModal";
 import MarketingPersonReferralsModal from "../components/MarketingPersonReferralsModal";
+import AttachmentIcon from "../components/AttachmentIcon";
 import { PANEL_OPTIONS } from "../utils/panels";
 import QrModal from "../components/QrModal";
 import MarketingPersonModal from "../components/MarketingPersonModal";
@@ -1628,7 +1629,7 @@ export default function AdminDashboard() {
                   {referrals.map((r) => (
                     <tr key={r.id}>
                       <td>
-                        <div className="cell-primary">{r.patientName}</div>
+                        <div className="cell-primary">{r.patientName}{r.attachmentPath && <AttachmentIcon referralId={r.id} />}</div>
                         <div className="cell-secondary">
                           {r.patientAge}{r.patientGender ? `${r.patientGender.charAt(0)}` : ""}
                           {r.fileNumber ? ` · ${r.fileNumber}` : ""}
