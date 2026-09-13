@@ -101,6 +101,8 @@ export default function AdminDashboard() {
   const [referralTab, setReferralTab] = useState("PENDING");
   const [referralSearch, setReferralSearch] = useState("");
   const [referralDoctorId, setReferralDoctorId] = useState("");
+  const [unpaidOnly, setUnpaidOnly] = useState(false);
+  const [bulkRedeeming, setBulkRedeeming] = useState(false);
   const [referralDateFrom, setReferralDateFrom] = useState("");
   const [referralDateTo, setReferralDateTo] = useState("");
 
@@ -206,12 +208,36 @@ export default function AdminDashboard() {
         doctorId: referralDoctorId || undefined,
         from: referralDateFrom || undefined,
         to: referralDateTo || undefined,
+        unpaidOnly: unpaidOnly || undefined,
         page: referralPage,
         pageSize: REFERRALS_PAGE_SIZE,
       },
     });
     setReferrals(data.referrals);
     setReferralTotal(data.total);
+  }
+
+  async function handleBulkRedeem() {
+    const confirmMsg = `Mark all unpaid credited referrals matching the current filters as redeemed? This cannot be undone in bulk — you'd need to fix them one at a time afterward.`;
+    if (!confirm(confirmMsg)) return;
+    setBulkRedeeming(true);
+    try {
+      const { data } = await api.post("/referrals/bulk-redeem", null, {
+        params: {
+          doctorId: referralDoctorId || undefined,
+          search: referralSearch || undefined,
+          from: referralDateFrom || undefined,
+          to: referralDateTo || undefined,
+        },
+      });
+      setMessage(data.message);
+      loadReferrals();
+      loadDashboard();
+    } catch (err) {
+      setMessage(err?.response?.data?.error || "Failed to bulk-redeem.");
+    } finally {
+      setBulkRedeeming(false);
+    }
   }
 
   async function loadHospitalSettings() {
@@ -261,8 +287,8 @@ export default function AdminDashboard() {
 
   useEffect(() => { loadDoctorsAndStaff(); loadDashboard(); loadHospitalSettings(); }, []);
   useEffect(() => { if (activeTab === "Marketing") loadMarketingList(); }, [activeTab]);
-  useEffect(() => { if (activeTab === "All Referrals") setReferralPage(1); }, [activeTab, referralTab, referralDoctorId, referralDateFrom, referralDateTo]);
-  useEffect(() => { if (activeTab === "All Referrals") loadReferrals(); }, [activeTab, referralTab, referralDoctorId, referralDateFrom, referralDateTo, referralPage]);
+  useEffect(() => { if (activeTab === "All Referrals") setReferralPage(1); }, [activeTab, referralTab, referralDoctorId, referralDateFrom, referralDateTo, unpaidOnly]);
+  useEffect(() => { if (activeTab === "All Referrals") loadReferrals(); }, [activeTab, referralTab, referralDoctorId, referralDateFrom, referralDateTo, unpaidOnly, referralPage]);
   useEffect(() => { setDoctorPage(1); }, [doctorSearch, doctorStatusFilter, doctorDateFrom, doctorDateTo]);
 
   async function handleCreateDoctor(e) {
@@ -1594,7 +1620,7 @@ export default function AdminDashboard() {
               </p>
             )}
 
-            <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginBottom: 4 }}>
+            <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginBottom: 14, alignItems: "flex-end" }}>
               <div style={{ flex: 1, minWidth: 200, maxWidth: 360 }}>
                 <label>Doctor</label>
                 <select value={referralDoctorId} onChange={(e) => setReferralDoctorId(e.target.value)}>
@@ -1604,6 +1630,24 @@ export default function AdminDashboard() {
                   ))}
                 </select>
               </div>
+              {referralTab === "CREDITED" && (
+                <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", marginLeft: "auto", paddingBottom: 10 }}>
+                  <label style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", marginBottom: 0 }}>
+                    <input type="checkbox" checked={unpaidOnly} onChange={(e) => setUnpaidOnly(e.target.checked)} style={{ width: "auto" }} />
+                    <span style={{ fontSize: 13.5, fontWeight: 600 }}>Unpaid only</span>
+                  </label>
+                  <button
+                    className="secondary"
+                    style={{ width: "auto", padding: "6px 14px", color: "#b45309", borderColor: "#fcd9a8" }}
+                    disabled={bulkRedeeming || referralTotal === 0}
+                    onClick={handleBulkRedeem}
+                    title="Applies to every unpaid credited referral matching your current Doctor / date / search filters — not just this page."
+                  >
+                    <CheckCircle2 size={14} />
+                    {bulkRedeeming ? "Marking…" : "Mark all as redeemed"}
+                  </button>
+                </div>
+              )}
             </div>
             <DateRangePicker from={referralDateFrom} to={referralDateTo} onChange={({ from, to }) => { setReferralDateFrom(from); setReferralDateTo(to); }} />
 

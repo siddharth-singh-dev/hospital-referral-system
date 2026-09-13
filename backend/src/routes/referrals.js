@@ -84,10 +84,14 @@ async function reverseGeocode(lat, lon) {
 // Shared filter builder used by the list view and both export endpoints, so exports
 // always match whatever the admin currently has filtered/searched for on screen.
 function buildWhere(req) {
-  const { search, status, doctorId, range, from: fromDate, to: toDate } = req.query;
+  const { search, status, doctorId, range, from: fromDate, to: toDate, unpaidOnly } = req.query;
   const where = { doctor: { hospitalId: req.user.hospitalId } };
   if (status) where.status = status;
   if (doctorId) where.doctorId = doctorId;
+  // Only meaningful for CREDITED referrals (that's the only status with a credit
+  // transaction at all), but harmless to apply regardless — a PENDING/REJECTED referral
+  // has no transaction, so it simply won't match `transaction: { redeemed: false }` either.
+  if (unpaidOnly === "true") where.transaction = { redeemed: false };
   if (search) {
     where.OR = [
       { patientName: { contains: search } },
@@ -1350,6 +1354,46 @@ router.post("/:id/redeem", requireAuth, requireAccess(["ADMIN"], ["REDEEM_CREDIT
   });
 
   res.json(updated);
+});
+
+// POST /api/referrals/bulk-redeem  (admin, or STAFF with REDEEM_CREDITS) — marks every
+// CREDITED, still-unpaid referral matching the CURRENT filters (doctor/date range/search —
+// the same filters "All Referrals" itself uses, via buildWhere) as redeemed in one action.
+// Meant for clearing a backlog of unpaid credits at once rather than clicking "Redeem" on
+// each row individually. Always scoped to CREDITED + unpaid regardless of which tab the
+// request's filters came from, and doesn't accept per-row payment method/reference/amount
+// overrides — the single-row redeem action still exists for that level of detail.
+router.post("/bulk-redeem", requireAuth, requireAccess(["ADMIN"], ["REDEEM_CREDITS"]), async (req, res) => {
+  const where = {
+    ...buildWhere(req),
+    status: "CREDITED",
+    transaction: { redeemed: false },
+  };
+
+  const referrals = await prisma.referral.findMany({
+    where,
+    select: { id: true, patientName: true, transaction: { select: { id: true } } },
+  });
+
+  if (referrals.length === 0) {
+    return res.json({ message: "No unpaid credited referrals matched the current filters.", count: 0 });
+  }
+
+  const redeemedAt = new Date();
+  await prisma.creditTransaction.updateMany({
+    where: { id: { in: referrals.map((r) => r.transaction.id) } },
+    data: { redeemed: true, redeemedAt, redeemedByUserId: req.user.id },
+  });
+
+  logActivity({
+    actor: req.user,
+    action: ACTIONS.CREDIT_REDEEMED,
+    entityType: "CreditTransaction",
+    entityLabel: `${referrals.length} referral${referrals.length === 1 ? "" : "s"} (bulk redeem)`,
+    metadata: { count: referrals.length, referralIds: referrals.map((r) => r.id) },
+  });
+
+  res.json({ message: `Marked ${referrals.length} credit${referrals.length === 1 ? "" : "s"} as redeemed.`, count: referrals.length });
 });
 
 // DELETE /api/referrals/:id  (admin only) - permanently removes a single referral row and any
