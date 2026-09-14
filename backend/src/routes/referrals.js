@@ -84,14 +84,15 @@ async function reverseGeocode(lat, lon) {
 // Shared filter builder used by the list view and both export endpoints, so exports
 // always match whatever the admin currently has filtered/searched for on screen.
 function buildWhere(req) {
-  const { search, status, doctorId, range, from: fromDate, to: toDate, unpaidOnly } = req.query;
+  const { search, status, doctorId, range, from: fromDate, to: toDate, unpaidOnly, paidOnly } = req.query;
   const where = { doctor: { hospitalId: req.user.hospitalId } };
   if (status) where.status = status;
   if (doctorId) where.doctorId = doctorId;
   // Only meaningful for CREDITED referrals (that's the only status with a credit
   // transaction at all), but harmless to apply regardless — a PENDING/REJECTED referral
-  // has no transaction, so it simply won't match `transaction: { redeemed: false }` either.
+  // has no transaction, so it simply won't match either filter.
   if (unpaidOnly === "true") where.transaction = { redeemed: false };
+  if (paidOnly === "true") where.transaction = { redeemed: true };
   if (search) {
     where.OR = [
       { patientName: { contains: search } },

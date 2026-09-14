@@ -33,6 +33,7 @@ export default function StaffPortal() {
   const [tab, setTab] = useState("PENDING");
   const [search, setSearch] = useState("");
   const [doctorId, setDoctorId] = useState("");
+  const [payoutFilter, setPayoutFilter] = useState(""); // "" | "unpaid" | "paid" — only shown/used on the Credited tab
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
   const [loading, setLoading] = useState(false);
@@ -54,6 +55,8 @@ export default function StaffPortal() {
           doctorId: doctorId || undefined,
           from: dateFrom || undefined,
           to: dateTo || undefined,
+          unpaidOnly: payoutFilter === "unpaid" || undefined,
+          paidOnly: payoutFilter === "paid" || undefined,
           page: 1,
           pageSize: 100,
         },
@@ -74,8 +77,8 @@ export default function StaffPortal() {
   }
 
   useEffect(() => { loadDoctors(); }, []);
-  useEffect(() => { load(); }, [tab, doctorId, dateFrom, dateTo]);
-  useEffect(() => { setPage(1); }, [tab, doctorId, dateFrom, dateTo, referrals.length]);
+  useEffect(() => { load(); }, [tab, doctorId, dateFrom, dateTo, payoutFilter]);
+  useEffect(() => { setPage(1); }, [tab, doctorId, dateFrom, dateTo, payoutFilter, referrals.length]);
 
   function openConfirmModal(referral) {
     setMessage("");
@@ -160,6 +163,8 @@ export default function StaffPortal() {
           doctorId: doctorId || undefined,
           from: dateFrom || undefined,
           to: dateTo || undefined,
+          unpaidOnly: payoutFilter === "unpaid" || undefined,
+          paidOnly: payoutFilter === "paid" || undefined,
         },
         responseType: "blob",
       });
@@ -223,6 +228,24 @@ export default function StaffPortal() {
                   ))}
                 </select>
               </div>
+              {tab === "CREDITED" && (
+                <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                  <label>Payout status</label>
+                  <div style={{ display: "flex", gap: 6 }}>
+                    {[["", "All"], ["unpaid", "Unpaid"], ["paid", "Paid"]].map(([key, label]) => (
+                      <button
+                        key={key || "all"}
+                        type="button"
+                        className={payoutFilter === key ? "" : "secondary"}
+                        style={{ width: "auto", padding: "8px 16px" }}
+                        onClick={() => setPayoutFilter(key)}
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
             <DateRangePicker from={dateFrom} to={dateTo} onChange={({ from, to }) => { setDateFrom(from); setDateTo(to); }} />
 
