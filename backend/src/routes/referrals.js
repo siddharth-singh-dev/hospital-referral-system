@@ -990,12 +990,19 @@ router.get("/export/excel", requireAuth, requireAccess(["ADMIN"], ["EXPORT_REPOR
   res.end();
 });
 
-// GET /api/referrals/export/pdf  (admin) — same filters, proper column-aligned table
+// GET /api/referrals/export/pdf  (admin) — same filters, proper column-aligned table.
+// One flat table sorted by date (most recent admission first) rather than grouped by leader —
+// grouping by leader made the date order essentially random within each group and buried
+// recent activity under whichever leader happened to sort first alphabetically.
 router.get("/export/pdf", requireAuth, requireAccess(["ADMIN"], ["EXPORT_REPORTS"]), async (req, res) => {
   const referrals = await prisma.referral.findMany({
     where: buildWhere(req),
     include: { doctor: true, transaction: true },
-    orderBy: [{ doctor: { name: "asc" } }, { createdAt: "asc" }],
+    // id as a tiebreaker keeps the order fully deterministic when many rows share the exact
+    // same admission date (common after a bulk import) — see the same fix applied to the
+    // paginated "All Referrals" list for why an unstable tiebreak-free sort is a real bug,
+    // not just a style choice.
+    orderBy: [{ arrivedAt: "desc" }, { createdAt: "desc" }, { id: "desc" }],
   });
 
   res.setHeader("Content-Type", "application/pdf");
@@ -1007,66 +1014,65 @@ router.get("/export/pdf", requireAuth, requireAccess(["ADMIN"], ["EXPORT_REPORTS
   const startX = doc.page.margins.left;
   const pageBottom = doc.page.height - doc.page.margins.bottom;
 
-  // Column widths kept compact for landscape A4; file number and visit type are short
-  // enough to fit without crowding the patient/location columns.
+  function addLandscapePage() {
+    doc.addPage({ margin: 36, size: "A4", layout: "landscape" });
+  }
+
+  // Compact widths for landscape A4 — sums to ~680pt, comfortably inside the ~770pt usable
+  // width (842pt page minus 36pt margins on each side).
   const columns = [
-    { key: "num", label: "#", width: 22 },
-    { key: "patient", label: "Patient", width: 95 },
-    { key: "fileNumber", label: "File No.", width: 65 },
-    { key: "gender", label: "Gender", width: 45 },
-    { key: "age", label: "Age", width: 28 },
-    { key: "status", label: "Status", width: 55 },
-    { key: "visitType", label: "Visit", width: 38 },
-    { key: "credit", label: "Credit", width: 52 },
-    { key: "date", label: "Date", width: 48 },
-    { key: "idCard", label: "ID / Card", width: 130 },
-    { key: "location", label: "Location", width: 160 },
+    { key: "num", label: "#", width: 20 },
+    { key: "patient", label: "Patient", width: 90 },
+    { key: "fileNumber", label: "File No.", width: 55 },
+    { key: "referredBy", label: "Referred By", width: 90 },
+    { key: "ageGender", label: "A/G", width: 36 },
+    { key: "status", label: "Status", width: 50 },
+    { key: "visitType", label: "Visit", width: 32 },
+    { key: "credit", label: "Credit", width: 48 },
+    { key: "payout", label: "Payout", width: 42 },
+    { key: "admission", label: "Admission", width: 58 },
+    { key: "discharged", label: "Discharged", width: 58 },
+    { key: "idCard", label: "ID / Card", width: 100 },
   ];
   const tableWidth = columns.reduce((s, c) => s + c.width, 0);
 
   function drawColumnHeader(y) {
     let x = startX;
     doc.fontSize(9).font("Helvetica-Bold").fillColor("#252e69");
-    columns.forEach((c) => { doc.text(c.label, x, y, { width: c.width }); x += c.width; });
+    columns.forEach((c) => { doc.text(c.label, x, y, { width: c.width, height: 13, ellipsis: true }); x += c.width; });
     doc.moveTo(startX, y + 13).lineTo(startX + tableWidth, y + 13).strokeColor("#d0d5dd").stroke();
     doc.font("Helvetica").fillColor("#101733");
     return y + 18;
   }
 
   doc.fontSize(16).font("Helvetica-Bold").text("Referral Report", { align: "center" });
-  doc.font("Helvetica").fontSize(9).fillColor("#667085").text(`Generated ${formatDateTime(new Date())}`, { align: "center" });
+  doc.font("Helvetica").fontSize(9).fillColor("#667085").text(`Generated ${formatDateTime(new Date())} — sorted by admission date, most recent first`, { align: "center" });
   doc.fillColor("#101733");
   let y = doc.y + 14;
+  y = drawColumnHeader(y);
 
-  let lastDoctorId = null;
-  let itemNumber = 0;
-
-  referrals.forEach((r) => {
-    if (r.doctorId !== lastDoctorId) {
-      lastDoctorId = r.doctorId;
-      itemNumber = 0;
-      if (y > doc.page.margins.top + 20) y += 10;
-      doc.fontSize(12).font("Helvetica-Bold").fillColor("#178a9a").text(`${r.doctor.name}${r.doctor.clinicName ? ` — ${r.doctor.clinicName}` : ""}`, startX, y);
-      doc.font("Helvetica").fillColor("#101733");
-      y += 18;
-      y = drawColumnHeader(y);
-    }
-
-    itemNumber += 1;
+  referrals.forEach((r, i) => {
+    const ageGender = `${r.patientAge}${r.patientGender ? "/" + r.patientGender.charAt(0) : ""}`;
     const credit = r.transaction ? `${Number(r.transaction.amount).toFixed(2)} pts` : "-";
-    let location = r.scanAddress || (r.scanLatitude != null ? `${r.scanLatitude.toFixed(4)}, ${r.scanLongitude.toFixed(4)}` : "Not shared");
-    if (location.length > 40) location = location.slice(0, 37) + "...";
-    let idCard = r.idNumber || "-";
-    if (idCard.length > 28) idCard = idCard.slice(0, 25) + "...";
+    const payout = r.transaction ? (r.transaction.redeemed ? "Paid" : "Unpaid") : "-";
+    // "Admission" is arrivedAt (set when reception confirms/credits the patient — see the
+    // manual-add and bulk-import routes, which set arrivedAt and createdAt together), falling
+    // back to createdAt for older rows predating that field.
+    const admission = r.arrivedAt || r.createdAt ? formatDate(r.arrivedAt || r.createdAt) : "-";
+    const discharged = r.dischargedAt ? formatDate(r.dischargedAt) : "-";
 
-    const rowValues = [itemNumber, r.patientName, r.fileNumber || "-", r.patientGender || "-", r.patientAge, r.status, r.visitType || "-", credit, formatDate(r.createdAt), idCard, location];
+    const rowValues = [i + 1, r.patientName, r.fileNumber || "-", r.doctor.name, ageGender, r.status, r.visitType || "-", credit, payout, admission, discharged, r.idNumber || "-"];
     let x = startX;
     doc.fontSize(9);
-    columns.forEach((c, i) => { doc.text(String(rowValues[i]), x, y, { width: c.width }); x += c.width; });
+    // height + ellipsis forces each cell to stay on a single line and truncate with "…"
+    // rather than wrapping — a manually character-sliced string was overflowing the column
+    // width and wrapping onto a second line for anything with a wide font (bold headers,
+    // long names), which visually overlapped the row underneath it.
+    columns.forEach((c, ci) => { doc.text(String(rowValues[ci]), x, y, { width: c.width, height: 13, ellipsis: true }); x += c.width; });
     y += 16;
 
     if (y > pageBottom - 20) {
-      doc.addPage();
+      addLandscapePage();
       y = doc.page.margins.top;
       y = drawColumnHeader(y);
     }
