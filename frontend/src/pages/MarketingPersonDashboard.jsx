@@ -9,12 +9,13 @@ const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:4000/api";
 
 // Self-service portal for a hospital marketing-team member. Reached via their personal
 // QR/link (/marketing/:id) + a password only they know. Shows their own stats plus one
-// action: submitting a lead on behalf of one of their own leaders (always lands as Pending,
-// same as a leader's own QR submission — no confirm/credit powers here). No way to see any
-// other marketing person's data, and no way to edit/manage existing referrals at all — that
-// part is still true. Uses its own token storage (keyed by this person's id) rather than the
-// shared staff `api` client, so it never collides with a hospital-staff login open in the
-// same browser.
+// action: submitting a lead on behalf of one of their own leaders (lands as Pending, same as
+// a leader's own QR submission — unless a card photo is attached, in which case it first sits
+// in reception's "Card Activity" queue until the card is verified). No confirm/credit powers
+// here. No way to see any other marketing person's data, and no way to edit/manage existing
+// referrals at all — that part is still true. Uses its own token storage (keyed by this
+// person's id) rather than the shared staff `api` client, so it never collides with a
+// hospital-staff login open in the same browser.
 export default function MarketingPersonDashboard() {
   const { id } = useParams();
   const tokenKey = `marketing_token_${id}`;
@@ -88,7 +89,7 @@ export default function MarketingPersonDashboard() {
       const res = await axios.post(`${API_BASE}/referrals/marketing-submit`, formData, {
         headers: { Authorization: `Bearer ${token}` },
       });
-      setLeadSuccess(res.data.message || "Lead submitted — it'll show up as Pending until reception confirms it.");
+      setLeadSuccess(res.data.message || "Lead submitted.");
       resetLeadForm();
       setShowLeadForm(false);
       loadReport(token); // refresh stats + leaders list, in case a new leader was just created
@@ -229,7 +230,7 @@ export default function MarketingPersonDashboard() {
           </div>
           {!showLeadForm && (
             <p style={{ fontSize: 13, color: "var(--ink-soft)", margin: "6px 0 0" }}>
-              Bringing in a patient yourself? Submit it here — it'll show up as Pending for reception to confirm, same as a leader's own QR submission.
+              Bringing in a patient yourself? Submit it here — it'll show up as Pending for reception to confirm, same as a leader's own QR submission. If you attach a card photo, reception verifies the card first.
             </p>
           )}
           {leadSuccess && !showLeadForm && <p style={{ color: "var(--teal-700)", fontSize: 13.5, marginTop: 10, marginBottom: 0 }}>{leadSuccess}</p>}
@@ -290,7 +291,7 @@ export default function MarketingPersonDashboard() {
               <label>Ward type (optional)</label>
               <input value={leadWardType} onChange={(e) => setLeadWardType(e.target.value)} placeholder="e.g. General Ward, Semi-Private Ward, ICU, NICU" />
 
-              <label>Attach a photo (optional)</label>
+              <label>Attach a card photo (optional)</label>
               <input
                 type="file"
                 accept="image/*,.pdf"
@@ -298,7 +299,7 @@ export default function MarketingPersonDashboard() {
               />
               <p style={{ fontSize: 11.5, color: "var(--ink-soft)", marginTop: -6, marginBottom: 8 }}>
                 <Paperclip size={11} style={{ verticalAlign: "middle", marginRight: 3 }} />
-                A photo of their ID/insurance card, a prescription, anything useful as proof of the lead.
+                A photo of their ID/insurance card (e.g. Ayushman), a prescription, anything useful as proof of the lead. If you attach a card photo, reception will check it's active before the lead moves to Pending.
               </p>
 
               {leadError && <p className="error">{leadError}</p>}

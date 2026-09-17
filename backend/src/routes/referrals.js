@@ -1438,10 +1438,14 @@ router.delete("/:id", requireAuth, requireRole("ADMIN"), async (req, res) => {
 });
 
 // POST /api/referrals/marketing-submit  (marketing person's own portal only) — a marketing
-// employee submits a lead directly, on behalf of one of their own leaders. Always lands as
-// PENDING, same as a leader's own QR-code submission — nothing here skips the usual
-// confirm/credit flow. multipart/form-data so an optional supporting image (ID card,
-// prescription, whatever proof they want attached) can come along in the same request.
+// employee submits a lead directly, on behalf of one of their own leaders. multipart/form-data
+// so an optional supporting image (ID card, prescription, whatever proof they want attached)
+// can come along in the same request.
+//
+// If a card photo is attached, the lead lands as CARD_REVIEW instead of PENDING — reception
+// has to check the card and mark it active (-> PENDING) or inactive (-> REJECTED) before it
+// enters the normal confirm/credit flow. A lead submitted with no photo skips this and goes
+// straight to PENDING, same as before.
 router.post("/marketing-submit", requireAuth, requireRole("MARKETING"), uploadAttachment.single("attachment"), async (req, res) => {
   const body = req.body || {};
   const patientName = (body.patientName || "").trim();
@@ -1473,6 +1477,8 @@ router.post("/marketing-submit", requireAuth, requireRole("MARKETING"), uploadAt
     });
   }
 
+  const hasCardPhoto = Boolean(req.file);
+
   const referral = await prisma.referral.create({
     data: {
       doctorId: doctor.id,
@@ -1485,6 +1491,7 @@ router.post("/marketing-submit", requireAuth, requireRole("MARKETING"), uploadAt
       forceType: body.forceType?.trim() || null,
       wardType: body.wardType?.trim() || null,
       attachmentPath: req.file ? path.basename(req.file.path) : null,
+      status: hasCardPhoto ? "CARD_REVIEW" : "PENDING",
     },
   });
 
@@ -1494,10 +1501,56 @@ router.post("/marketing-submit", requireAuth, requireRole("MARKETING"), uploadAt
     entityType: "Referral",
     entityId: referral.id,
     entityLabel: patientName,
-    metadata: { doctorId: doctor.id, doctorName: doctor.name, newLeaderCreated: !leaderId, hadAttachment: Boolean(req.file) },
+    metadata: { doctorId: doctor.id, doctorName: doctor.name, newLeaderCreated: !leaderId, hadAttachment: hasCardPhoto },
   });
 
-  res.status(201).json({ message: "Lead submitted — it'll show up as Pending until reception confirms it.", referralId: referral.id, doctorName: doctor.name });
+  res.status(201).json({
+    message: hasCardPhoto
+      ? "Lead submitted — reception will verify the card before it moves to Pending."
+      : "Lead submitted — it'll show up as Pending until reception confirms it.",
+    referralId: referral.id,
+    doctorName: doctor.name,
+  });
+});
+
+// POST /api/referrals/:id/verify-card  (reception + admin) — reception has looked at the
+// card photo attached to a CARD_REVIEW lead and decides whether it's active. Active moves
+// the lead into the normal PENDING queue (same as any other freshly-submitted lead); inactive
+// rejects it outright, same shape as the regular reject endpoint, so it never enters PENDING.
+router.post("/:id/verify-card", requireAuth, requireAccess(["ADMIN", "RECEPTION"], ["MANAGE_REFERRALS"]), async (req, res) => {
+  const { active, reason } = req.body;
+  if (typeof active !== "boolean") {
+    return res.status(400).json({ error: "active (true/false) is required" });
+  }
+
+  const referral = await prisma.referral.findFirst({
+    where: { id: req.params.id, doctor: { hospitalId: req.user.hospitalId } },
+  });
+  if (!referral) return res.status(404).json({ error: "Referral not found" });
+  if (referral.status !== "CARD_REVIEW") {
+    return res.status(400).json({ error: "This referral isn't awaiting card verification" });
+  }
+
+  const nextStatus = active ? "PENDING" : "REJECTED";
+  const updated = await prisma.referral.update({
+    where: { id: req.params.id },
+    data: {
+      status: nextStatus,
+      ...(active ? {} : { rejectedReason: reason || "Card not active" }),
+    },
+  });
+
+  logActivity({
+    actor: req.user,
+    action: active ? ACTIONS.REFERRAL_CARD_VERIFIED_ACTIVE : ACTIONS.REFERRAL_CARD_VERIFIED_INACTIVE,
+    entityType: "Referral",
+    entityId: referral.id,
+    entityLabel: referral.patientName,
+    changes: { status: { from: referral.status, to: nextStatus } },
+    metadata: active ? {} : { reason: reason || "Card not active" },
+  });
+
+  res.json(updated);
 });
 
 // GET /api/referrals/:id/attachment — streams back the supporting image/PDF uploaded with a

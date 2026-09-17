@@ -4,7 +4,7 @@ import {
   LayoutDashboard, Stethoscope, Users, ClipboardList, Plus, Power,
   Wallet, Trash2, KeyRound, Download, Search, CheckCircle2,
   XCircle, MapPin, X, ChevronUp, ChevronDown, ChevronLeft, ChevronRight,
-  Eye, TrendingUp, IndianRupee, UserCheck, Clock, Award, ArrowUpCircle, RotateCcw, Upload, LogOut, UserPlus, Pencil, Megaphone, QrCode, History,
+  Eye, TrendingUp, IndianRupee, UserCheck, Clock, Award, ArrowUpCircle, RotateCcw, Upload, LogOut, UserPlus, Pencil, Megaphone, QrCode, History, IdCard,
 } from "lucide-react";
 import { ResponsiveContainer, AreaChart, Area, XAxis, YAxis, Tooltip, CartesianGrid, BarChart, Bar, Cell, PieChart, Pie, Legend } from "recharts";
 import api from "../api/client";
@@ -50,6 +50,7 @@ const PERMISSION_LABELS = {
   REDEEM_CREDITS: "Redeem (mark as paid out) doctor credit payouts",
 };
 const REFERRAL_TABS = [
+  { key: "CARD_REVIEW", label: "Card Activity" },
   { key: "PENDING", label: "Pending" },
   { key: "CREDITED", label: "Credited" },
   { key: "REJECTED", label: "Rejected" },
@@ -473,6 +474,30 @@ export default function AdminDashboard() {
       loadReferrals();
     } catch (err) {
       setMessage(err.response?.data?.error || "Failed to update referral");
+    }
+  }
+
+  async function markCardActive(referral) {
+    if (!confirm(`Mark ${referral.patientName}'s card as active? This will move the lead into Pending.`)) return;
+    setMessage("");
+    try {
+      await api.post(`/referrals/${referral.id}/verify-card`, { active: true });
+      setMessage(`Card verified — ${referral.patientName} is now in Pending.`);
+      loadReferrals();
+    } catch (err) {
+      setMessage(err.response?.data?.error || "Failed to verify card");
+    }
+  }
+
+  async function markCardInactive(referral) {
+    const reason = prompt("Reason the card isn't active (optional):") || "";
+    setMessage("");
+    try {
+      await api.post(`/referrals/${referral.id}/verify-card`, { active: false, reason });
+      setMessage(`${referral.patientName}'s card was marked inactive — moved to Rejected.`);
+      loadReferrals();
+    } catch (err) {
+      setMessage(err.response?.data?.error || "Failed to verify card");
     }
   }
 
@@ -1737,6 +1762,12 @@ export default function AdminDashboard() {
                       </td>
                       <td className="row-hover-actions" style={{ whiteSpace: "nowrap" }}>
                         <div style={{ display: "flex", gap: 4, justifyContent: "flex-end" }}>
+                          {r.status === "CARD_REVIEW" && (
+                            <>
+                              <button style={{ width: "auto", padding: 7 }} title="Mark card active" onClick={() => markCardActive(r)}><IdCard size={14} /></button>
+                              <button className="danger" style={{ width: "auto", padding: 7 }} title="Mark card inactive" onClick={() => markCardInactive(r)}><XCircle size={14} /></button>
+                            </>
+                          )}
                           {r.status === "PENDING" && (
                             <>
                               <button style={{ width: "auto", padding: 7 }} title="Confirm" onClick={() => openConfirmModal(r)}><CheckCircle2 size={14} /></button>

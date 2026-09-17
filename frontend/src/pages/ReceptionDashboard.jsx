@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Search, CheckCircle2, XCircle, MapPin, ChevronLeft, ChevronRight, ArrowUpCircle, UserPlus, LogOut } from "lucide-react";
+import { Search, CheckCircle2, XCircle, MapPin, ChevronLeft, ChevronRight, ArrowUpCircle, UserPlus, LogOut, IdCard } from "lucide-react";
 import api from "../api/client";
 import { formatDate, formatDateTime } from "../utils/date";
 import DateRangePicker from "../components/DateRangePicker";
@@ -12,6 +12,7 @@ import { PANEL_OPTIONS } from "../utils/panels";
 
 const PAGE_SIZE = 10;
 const TABS = [
+  { key: "CARD_REVIEW", label: "Card Activity" },
   { key: "PENDING", label: "Pending" },
   { key: "CREDITED", label: "Credited" },
   { key: "REJECTED", label: "Rejected" },
@@ -125,6 +126,30 @@ export default function ReceptionDashboard() {
     }
   }
 
+  async function markCardActive(referral) {
+    if (!confirm(`Mark ${referral.patientName}'s card as active? This will move the lead into Pending.`)) return;
+    setMessage("");
+    try {
+      await api.post(`/referrals/${referral.id}/verify-card`, { active: true });
+      setMessage(`Card verified — ${referral.patientName} is now in Pending.`);
+      load();
+    } catch (err) {
+      setMessage(err.response?.data?.error || "Failed to verify card");
+    }
+  }
+
+  async function markCardInactive(referral) {
+    const reason = prompt("Reason the card isn't active (optional):") || "";
+    setMessage("");
+    try {
+      await api.post(`/referrals/${referral.id}/verify-card`, { active: false, reason });
+      setMessage(`${referral.patientName}'s card was marked inactive — moved to Rejected.`);
+      load();
+    } catch (err) {
+      setMessage(err.response?.data?.error || "Failed to verify card");
+    }
+  }
+
   function logout() {
     localStorage.clear();
     navigate("/login");
@@ -227,6 +252,12 @@ export default function ReceptionDashboard() {
                   <td>{formatDate(r.createdAt)}</td>
                   <td style={{ whiteSpace: "nowrap" }}>
                     <div style={{ display: "flex", gap: 6 }}>
+                      {r.status === "CARD_REVIEW" && (
+                        <>
+                          <button style={{ width: "auto", padding: "6px 10px" }} onClick={() => markCardActive(r)}><IdCard size={14} />Mark active</button>
+                          <button className="danger" style={{ width: "auto", padding: "6px 10px" }} onClick={() => markCardInactive(r)}><XCircle size={14} />Mark inactive</button>
+                        </>
+                      )}
                       {r.status === "PENDING" && (
                         <>
                           <button style={{ width: "auto", padding: "6px 10px" }} onClick={() => openConfirmModal(r)}><CheckCircle2 size={14} />Confirm</button>

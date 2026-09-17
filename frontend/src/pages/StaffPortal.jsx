@@ -13,6 +13,7 @@ import { PANEL_OPTIONS } from "../utils/panels";
 const PAGE_SIZE = 10;
 
 const REFERRAL_TABS = [
+  { key: "CARD_REVIEW", label: "Card Activity" },
   { key: "PENDING", label: "Pending" },
   { key: "CREDITED", label: "Credited" },
   { key: "REJECTED", label: "Rejected" },
@@ -134,6 +135,30 @@ export default function StaffPortal() {
       load();
     } catch (err) {
       setMessage(err.response?.data?.error || "Failed to update referral");
+    }
+  }
+
+  async function markCardActive(referral) {
+    if (!confirm(`Mark ${referral.patientName}'s card as active? This will move the lead into Pending.`)) return;
+    setMessage("");
+    try {
+      await api.post(`/referrals/${referral.id}/verify-card`, { active: true });
+      setMessage(`Card verified — ${referral.patientName} is now in Pending.`);
+      load();
+    } catch (err) {
+      setMessage(err.response?.data?.error || "Failed to verify card");
+    }
+  }
+
+  async function markCardInactive(referral) {
+    const reason = prompt("Reason the card isn't active (optional):") || "";
+    setMessage("");
+    try {
+      await api.post(`/referrals/${referral.id}/verify-card`, { active: false, reason });
+      setMessage(`${referral.patientName}'s card was marked inactive — moved to Rejected.`);
+      load();
+    } catch (err) {
+      setMessage(err.response?.data?.error || "Failed to verify card");
     }
   }
 
@@ -340,6 +365,12 @@ export default function StaffPortal() {
                       {showActionsColumn && (
                         <td style={{ whiteSpace: "nowrap" }}>
                           <div style={{ display: "flex", gap: 6 }}>
+                            {canManage && r.status === "CARD_REVIEW" && (
+                              <>
+                                <button style={{ width: "auto", padding: "6px 10px" }} onClick={() => markCardActive(r)}>Mark active</button>
+                                <button className="danger" style={{ width: "auto", padding: "6px 10px" }} onClick={() => markCardInactive(r)}>Mark inactive</button>
+                              </>
+                            )}
                             {canManage && r.status === "PENDING" && (
                               <>
                                 <button style={{ width: "auto", padding: "6px 10px" }} onClick={() => openConfirmModal(r)}>Confirm arrival</button>

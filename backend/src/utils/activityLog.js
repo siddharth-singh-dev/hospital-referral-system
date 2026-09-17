@@ -6,6 +6,8 @@ import prisma from "./prismaClient.js";
 export const ACTIONS = {
   REFERRAL_SUBMITTED: "referral.submitted",       // patient submitted via public QR/link
   REFERRAL_SUBMITTED_BY_MARKETING: "referral.submitted_by_marketing", // marketing employee submitted a lead through their own portal
+  REFERRAL_CARD_VERIFIED_ACTIVE: "referral.card_verified_active",     // reception checked the attached card photo and it's active -> moved to PENDING
+  REFERRAL_CARD_VERIFIED_INACTIVE: "referral.card_verified_inactive", // reception checked the attached card photo and it's NOT active -> REJECTED
   REFERRAL_ADDED_MANUALLY: "referral.added_manually",
   REFERRAL_BULK_IMPORTED: "referral.bulk_imported",
   REFERRAL_BULK_IMPORT_REVERTED: "referral.bulk_import_reverted",

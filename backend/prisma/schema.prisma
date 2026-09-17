@@ -15,10 +15,15 @@ enum Role {
 }
 
 enum ReferralStatus {
+  CARD_REVIEW // marketing submitted a lead with a card photo (e.g. Ayushman) attached;
+              // sits here until reception checks the card and marks it active (-> PENDING)
+              // or inactive (-> REJECTED). Never the status for a lead submitted without
+              // a card photo — those still land straight in PENDING.
   PENDING     // patient details submitted via QR, not yet arrived
   ARRIVED     // reserved for future use
   CREDITED    // reception matched & confirmed patient arrival, doctor credited
-  REJECTED    // reception determined this wasn't a valid match
+  REJECTED    // reception determined this wasn't a valid match (also used when a card
+              // turns out to be inactive)
 }
 
 enum PatientGender {

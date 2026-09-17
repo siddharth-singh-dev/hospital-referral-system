@@ -175,6 +175,7 @@ td { color: var(--ink); }
 tr:hover td { background: var(--teal-50); }
 
 .badge { padding: 3px 10px; border-radius: 999px; font-size: 12px; font-weight: 700; display: inline-block; }
+.badge.CARD_REVIEW { background: var(--blue-50, #eff6ff); color: var(--blue-700, #1d4ed8); }
 .badge.PENDING { background: var(--amber-50); color: var(--amber-700); }
 .badge.CREDITED { background: var(--green-100); color: var(--green-700); }
 .badge.REJECTED { background: var(--red-50); color: var(--red-700); }
