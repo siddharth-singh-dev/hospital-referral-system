@@ -55,6 +55,39 @@ model Hospital {
   marketingPersons MarketingPerson[]
   importBatches    ImportBatch[]
   activityLogs     ActivityLog[]
+  notifications    Notification[]
+}
+
+// One row per referral-related event worth surfacing in the notification bell: a new card
+// needing verification, a new lead landing in Pending, a referral getting credited, or one
+// getting rejected. Broadcast to the whole hospital (not one specific user) — read state is
+// tracked per-user via NotificationRead, so each staff member's bell reflects only what
+// they've personally seen.
+model Notification {
+  id          String   @id @default(uuid())
+  hospitalId  String
+  hospital    Hospital @relation(fields: [hospitalId], references: [id])
+
+  type        String   // "CARD_REVIEW_NEW" | "PENDING_NEW" | "REFERRAL_CREDITED" | "REFERRAL_REJECTED"
+  message     String   // precomputed, human-readable (e.g. "New card to verify — Ramesh Kumar")
+  referralId  String?
+  createdAt   DateTime @default(now())
+
+  reads       NotificationRead[]
+
+  @@index([hospitalId, createdAt])
+}
+
+// One row per (notification, user who has seen it). Absence of a row = unread for that user.
+model NotificationRead {
+  id             String       @id @default(uuid())
+  notificationId String
+  notification   Notification @relation(fields: [notificationId], references: [id])
+  userId         String
+  readAt         DateTime     @default(now())
+
+  @@unique([notificationId, userId])
+  @@index([userId])
 }
 
 // One row per meaningful change anywhere in the system for this hospital — referral status

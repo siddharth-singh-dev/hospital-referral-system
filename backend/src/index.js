@@ -11,6 +11,7 @@ import dashboardRoutes from "./routes/dashboard.js";
 import marketingPersonRoutes from "./routes/marketingPersons.js";
 import activityLogRoutes from "./routes/activityLog.js";
 import ocrRoutes from "./routes/ocr.js";
+import notificationRoutes from "./routes/notifications.js";
 
 const app = express();
 
@@ -52,6 +53,7 @@ app.use("/api/dashboard", dashboardRoutes);
 app.use("/api/marketing-persons", marketingPersonRoutes);
 app.use("/api/activity-log", activityLogRoutes);
 app.use("/api/ocr", ocrRoutes);
+app.use("/api/notifications", notificationRoutes);
 
 // Central error handler
 app.use((err, req, res, next) => {

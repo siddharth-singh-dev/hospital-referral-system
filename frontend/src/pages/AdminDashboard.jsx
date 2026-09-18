@@ -25,6 +25,7 @@ import AddPatientModal from "../components/AddPatientModal";
 import EditReferralModal from "../components/EditReferralModal";
 import MarketingPersonReferralsModal from "../components/MarketingPersonReferralsModal";
 import AttachmentIcon from "../components/AttachmentIcon";
+import NotificationBell from "../components/NotificationBell";
 import { PANEL_OPTIONS } from "../utils/panels";
 import QrModal from "../components/QrModal";
 import MarketingPersonModal from "../components/MarketingPersonModal";
@@ -106,6 +107,7 @@ export default function AdminDashboard() {
   const [bulkRedeeming, setBulkRedeeming] = useState(false);
   const [referralDateFrom, setReferralDateFrom] = useState("");
   const [referralDateTo, setReferralDateTo] = useState("");
+  const [referralStatusCounts, setReferralStatusCounts] = useState({});
 
   const [dashboardData, setDashboardData] = useState(null);
   const [doctorsPeriod, setDoctorsPeriod] = useState("month");
@@ -218,6 +220,15 @@ export default function AdminDashboard() {
     setReferralTotal(data.total);
   }
 
+  async function loadReferralStatusCounts() {
+    try {
+      const { data } = await api.get("/referrals/status-counts");
+      setReferralStatusCounts(data);
+    } catch {
+      // non-critical — tab badges just stay hidden
+    }
+  }
+
   async function handleBulkRedeem() {
     const confirmMsg = `Mark all unpaid credited referrals matching the current filters as redeemed? This cannot be undone in bulk — you'd need to fix them one at a time afterward.`;
     if (!confirm(confirmMsg)) return;
@@ -287,6 +298,14 @@ export default function AdminDashboard() {
   }
 
   useEffect(() => { loadDoctorsAndStaff(); loadDashboard(); loadHospitalSettings(); }, []);
+  // Keep the Card Activity badge fresh regardless of which section of the admin panel is
+  // open, so it's a useful "heads up" even before clicking into All Referrals.
+  useEffect(() => {
+    loadReferralStatusCounts();
+    const interval = setInterval(loadReferralStatusCounts, 30000);
+    return () => clearInterval(interval);
+  }, []);
+  useEffect(() => { if (activeTab === "All Referrals") loadReferralStatusCounts(); }, [referrals.length]);
   useEffect(() => { if (activeTab === "Marketing") loadMarketingList(); }, [activeTab]);
   useEffect(() => { if (activeTab === "All Referrals") setReferralPage(1); }, [activeTab, referralTab, referralDoctorId, referralDateFrom, referralDateTo, unpaidOnly]);
   useEffect(() => { if (activeTab === "All Referrals") loadReferrals(); }, [activeTab, referralTab, referralDoctorId, referralDateFrom, referralDateTo, unpaidOnly, referralPage]);
@@ -651,7 +670,7 @@ export default function AdminDashboard() {
     );
   }
 
-  const pendingReferralsBadge = dashboardData?.kpis?.pendingReferrals || 0;
+  const pendingReferralsBadge = (referralStatusCounts.PENDING ?? dashboardData?.kpis?.pendingReferrals ?? 0) + (referralStatusCounts.CARD_REVIEW || 0);
 
   function SortHeader({ label, sk }) {
     return (
@@ -684,6 +703,7 @@ export default function AdminDashboard() {
             <h2>{NAV_ITEMS.find((n) => n.key === activeTab)?.label || activeTab}</h2>
             <p>{user?.hospitalName}{user?.hospitalBranchName ? ` · ${user.hospitalBranchName}` : ""}</p>
           </div>
+          <NotificationBell />
         </div>
 
         {message && <p className="success">{message}</p>}
@@ -1628,6 +1648,17 @@ export default function AdminDashboard() {
                     onClick={() => setReferralTab(t.key)}
                   >
                     {t.label}
+                    {t.key === "CARD_REVIEW" && referralStatusCounts.CARD_REVIEW > 0 && (
+                      <span
+                        style={{
+                          marginLeft: 7, background: referralTab === t.key ? "rgba(255,255,255,0.35)" : "var(--amber-500, #f59e0b)",
+                          color: referralTab === t.key ? "inherit" : "#fff", borderRadius: 999, padding: "1px 7px",
+                          fontSize: 12, fontWeight: 700,
+                        }}
+                      >
+                        {referralStatusCounts.CARD_REVIEW}
+                      </span>
+                    )}
                   </button>
                 ))}
               </div>

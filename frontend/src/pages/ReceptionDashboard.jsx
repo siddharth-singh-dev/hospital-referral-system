@@ -8,6 +8,7 @@ import ConfirmLeadModal from "../components/ConfirmLeadModal";
 import ConvertToIpdModal from "../components/ConvertToIpdModal";
 import AddPatientModal from "../components/AddPatientModal";
 import AttachmentIcon from "../components/AttachmentIcon";
+import NotificationBell from "../components/NotificationBell";
 import { PANEL_OPTIONS } from "../utils/panels";
 
 const PAGE_SIZE = 10;
@@ -33,6 +34,7 @@ export default function ReceptionDashboard() {
   const [confirmModal, setConfirmModal] = useState(null);
   const [convertModal, setConvertModal] = useState(null);
   const [showAddPatient, setShowAddPatient] = useState(false);
+  const [statusCounts, setStatusCounts] = useState({});
   const navigate = useNavigate();
   const user = JSON.parse(localStorage.getItem("user") || "null");
 
@@ -65,9 +67,29 @@ export default function ReceptionDashboard() {
     }
   }
 
+  async function loadStatusCounts() {
+    try {
+      const { data } = await api.get("/referrals/status-counts");
+      setStatusCounts(data);
+    } catch {
+      // non-critical — tab badges just stay hidden
+    }
+  }
+
   useEffect(() => { loadDoctors(); }, []);
   useEffect(() => { load(); }, [tab, doctorId, dateFrom, dateTo]);
   useEffect(() => { setPage(1); }, [tab, doctorId, dateFrom, dateTo, referrals.length]);
+  // Keep the Card Activity badge fresh even while looking at another tab — reception
+  // shouldn't have to click over to Card Activity just to notice new cards came in.
+  useEffect(() => {
+    loadStatusCounts();
+    const interval = setInterval(loadStatusCounts, 30000);
+    return () => clearInterval(interval);
+  }, []);
+  // Also refresh right away whenever an action changes referral counts (confirm/reject/
+  // verify-card all call load() via their own handlers, and referrals.length changing is
+  // a reasonable signal that counts moved).
+  useEffect(() => { loadStatusCounts(); }, [referrals.length]);
 
   function openConfirmModal(referral) {
     setMessage("");
@@ -164,7 +186,8 @@ export default function ReceptionDashboard() {
         </div>
         <div>
           <span style={{ marginRight: 16, color: "#667085" }}>{user?.name}</span>
-          <button className="secondary" style={{ width: "auto", padding: "6px 14px" }} onClick={logout}>Log out</button>
+          <NotificationBell />
+          <button className="secondary" style={{ width: "auto", padding: "6px 14px", marginLeft: 10 }} onClick={logout}>Log out</button>
         </div>
       </div>
 
@@ -180,6 +203,17 @@ export default function ReceptionDashboard() {
                   onClick={() => setTab(t.key)}
                 >
                   {t.label}
+                  {t.key === "CARD_REVIEW" && statusCounts.CARD_REVIEW > 0 && (
+                    <span
+                      style={{
+                        marginLeft: 7, background: tab === t.key ? "rgba(255,255,255,0.35)" : "var(--amber-500, #f59e0b)",
+                        color: tab === t.key ? "inherit" : "#fff", borderRadius: 999, padding: "1px 7px",
+                        fontSize: 12, fontWeight: 700,
+                      }}
+                    >
+                      {statusCounts.CARD_REVIEW}
+                    </span>
+                  )}
                 </button>
               ))}
             </div>

@@ -13,6 +13,7 @@ import { requireAuth, requireRole, requireAccess } from "../middleware/auth.js";
 import { startOfIstDay, istDayBounds } from "../utils/istDate.js";
 import { formatDate, formatDateTime } from "../utils/formatDate.js";
 import { logActivity, diffFields, ACTIONS } from "../utils/activityLog.js";
+import { notify, NOTIFICATION_TYPES } from "../utils/notifications.js";
 import { normalizePanel } from "../utils/panels.js";
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024 } });
@@ -163,6 +164,13 @@ router.post("/", publicLimiter, async (req, res) => {
     entityId: referral.id,
     entityLabel: patientName,
     metadata: { doctorId: doctor.id, doctorName: doctor.name, via: "QR link" },
+  });
+
+  notify({
+    hospitalId: doctor.hospitalId,
+    type: NOTIFICATION_TYPES.PENDING_NEW,
+    message: `New pending lead — ${patientName} (via ${doctor.name})`,
+    referralId: referral.id,
   });
 
   res.status(201).json({ message: "Referral submitted successfully", referralId: referral.id });
@@ -929,6 +937,21 @@ router.get("/", requireAuth, requireAccess(["ADMIN", "RECEPTION"], ["VIEW_REFERR
   res.json({ referrals, total, page, pageSize });
 });
 
+// GET /api/referrals/status-counts  (reception + admin, same access as the list above) —
+// small/cheap endpoint just for badge counts (e.g. the "Card Activity" tab), so the UI
+// doesn't have to fetch a full paginated page of a tab just to know how many rows are in it.
+// Scoped to the caller's hospital, same as the list route.
+router.get("/status-counts", requireAuth, requireAccess(["ADMIN", "RECEPTION"], ["VIEW_REFERRALS", "MANAGE_REFERRALS"]), async (req, res) => {
+  const grouped = await prisma.referral.groupBy({
+    by: ["status"],
+    where: { doctor: { hospitalId: req.user.hospitalId } },
+    _count: { _all: true },
+  });
+  const counts = { CARD_REVIEW: 0, PENDING: 0, ARRIVED: 0, CREDITED: 0, REJECTED: 0 };
+  for (const row of grouped) counts[row.status] = row._count._all;
+  res.json(counts);
+});
+
 // GET /api/referrals/export/excel  (admin) — respects the same search/status filters as the list view
 router.get("/export/excel", requireAuth, requireAccess(["ADMIN"], ["EXPORT_REPORTS"]), async (req, res) => {
   const referrals = await prisma.referral.findMany({
@@ -1147,6 +1170,13 @@ router.post("/:id/arrive", requireAuth, requireAccess(["ADMIN", "RECEPTION"], ["
     metadata: { visitType, fileNumber: String(fileNumber).trim(), amount: Number(amount), doctorName: referral.doctor.name },
   });
 
+  notify({
+    hospitalId: req.user.hospitalId,
+    type: NOTIFICATION_TYPES.REFERRAL_CREDITED,
+    message: `Credited — ${referral.patientName} (${visitType}, ${referral.doctor.name})`,
+    referralId: referral.id,
+  });
+
   res.json(result);
 });
 
@@ -1281,6 +1311,13 @@ router.post("/:id/reject", requireAuth, requireAccess(["ADMIN", "RECEPTION"], ["
     entityLabel: referral.patientName,
     changes: { status: { from: referral.status, to: "REJECTED" } },
     metadata: { reason: reason || "No reason given" },
+  });
+
+  notify({
+    hospitalId: req.user.hospitalId,
+    type: NOTIFICATION_TYPES.REFERRAL_REJECTED,
+    message: `Rejected — ${referral.patientName}`,
+    referralId: referral.id,
   });
 
   res.json(updated);
@@ -1504,6 +1541,15 @@ router.post("/marketing-submit", requireAuth, requireRole("MARKETING"), uploadAt
     metadata: { doctorId: doctor.id, doctorName: doctor.name, newLeaderCreated: !leaderId, hadAttachment: hasCardPhoto },
   });
 
+  notify({
+    hospitalId: req.user.hospitalId,
+    type: hasCardPhoto ? NOTIFICATION_TYPES.CARD_REVIEW_NEW : NOTIFICATION_TYPES.PENDING_NEW,
+    message: hasCardPhoto
+      ? `New card to verify — ${patientName} (via ${doctor.name})`
+      : `New pending lead — ${patientName} (via ${doctor.name})`,
+    referralId: referral.id,
+  });
+
   res.status(201).json({
     message: hasCardPhoto
       ? "Lead submitted — reception will verify the card before it moves to Pending."
@@ -1548,6 +1594,15 @@ router.post("/:id/verify-card", requireAuth, requireAccess(["ADMIN", "RECEPTION"
     entityLabel: referral.patientName,
     changes: { status: { from: referral.status, to: nextStatus } },
     metadata: active ? {} : { reason: reason || "Card not active" },
+  });
+
+  notify({
+    hospitalId: req.user.hospitalId,
+    type: active ? NOTIFICATION_TYPES.PENDING_NEW : NOTIFICATION_TYPES.REFERRAL_REJECTED,
+    message: active
+      ? `Card verified, moved to Pending — ${referral.patientName}`
+      : `Card marked inactive, rejected — ${referral.patientName}`,
+    referralId: referral.id,
   });
 
   res.json(updated);
