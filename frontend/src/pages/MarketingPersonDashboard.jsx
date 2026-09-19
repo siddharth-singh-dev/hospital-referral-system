@@ -1,11 +1,17 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useParams } from "react-router-dom";
 import axios from "axios";
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid } from "recharts";
-import { Lock, TrendingUp, Users, LogOut, UserPlus, Paperclip } from "lucide-react";
+import { Lock, TrendingUp, LogOut, UserPlus, Paperclip, FileImage, Camera, ChevronRight, X } from "lucide-react";
+import Modal from "../components/Modal";
 import { PANEL_OPTIONS } from "../utils/panels";
 
 const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:4000/api";
+
+const CURRENT_YEAR = new Date().getFullYear();
+// Newborn (this year) down to 110 years old — covers realistic patient ages without asking
+// for a full date of birth, which the hospital doesn't otherwise collect for a quick lead.
+const BIRTH_YEARS = Array.from({ length: 111 }, (_, i) => CURRENT_YEAR - i);
 
 // Self-service portal for a hospital marketing-team member. Reached via their personal
 // QR/link (/marketing/:id) + a password only they know. Shows their own stats plus one
@@ -29,34 +35,32 @@ export default function MarketingPersonDashboard() {
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState("");
 
+  const [showLeadersModal, setShowLeadersModal] = useState(false);
+
   // -------------------- Submit a lead --------------------
   const [showLeadForm, setShowLeadForm] = useState(false);
   const [leaderChoice, setLeaderChoice] = useState(""); // an existing leader's id, or "" / "__new__"
   const [newLeaderName, setNewLeaderName] = useState("");
   const [leadName, setLeadName] = useState("");
-  const [leadAge, setLeadAge] = useState("");
+  const [birthYear, setBirthYear] = useState("");
   const [leadGender, setLeadGender] = useState("MALE");
-  const [leadPhone, setLeadPhone] = useState("");
   const [leadPanel, setLeadPanel] = useState("");
-  const [leadIdNumber, setLeadIdNumber] = useState("");
-  const [leadForceType, setLeadForceType] = useState("");
-  const [leadWardType, setLeadWardType] = useState("");
   const [attachmentFile, setAttachmentFile] = useState(null);
   const [submittingLead, setSubmittingLead] = useState(false);
   const [leadError, setLeadError] = useState("");
   const [leadSuccess, setLeadSuccess] = useState("");
+  const fileInputRef = useRef(null);
+  const cameraInputRef = useRef(null);
+
+  const computedAge = birthYear ? CURRENT_YEAR - Number(birthYear) : "";
 
   function resetLeadForm() {
     setLeaderChoice("");
     setNewLeaderName("");
     setLeadName("");
-    setLeadAge("");
+    setBirthYear("");
     setLeadGender("MALE");
-    setLeadPhone("");
     setLeadPanel("");
-    setLeadIdNumber("");
-    setLeadForceType("");
-    setLeadWardType("");
     setAttachmentFile(null);
   }
 
@@ -71,17 +75,17 @@ export default function MarketingPersonDashboard() {
       setLeadError("Type the new leader's name.");
       return;
     }
+    if (!birthYear) {
+      setLeadError("Select the patient's birth year.");
+      return;
+    }
     setSubmittingLead(true);
     try {
       const formData = new FormData();
       formData.append("patientName", leadName.trim());
-      formData.append("patientAge", leadAge);
+      formData.append("patientAge", computedAge);
       formData.append("patientGender", leadGender);
-      if (leadPhone.trim()) formData.append("patientPhone", leadPhone.trim());
       if (leadPanel) formData.append("panel", leadPanel);
-      if (leadIdNumber.trim()) formData.append("idNumber", leadIdNumber.trim());
-      if (leadForceType.trim()) formData.append("forceType", leadForceType.trim());
-      if (leadWardType.trim()) formData.append("wardType", leadWardType.trim());
       if (leaderChoice === "__new__") formData.append("newLeaderName", newLeaderName.trim());
       else formData.append("leaderId", leaderChoice);
       if (attachmentFile) formData.append("attachment", attachmentFile);
@@ -195,122 +199,35 @@ export default function MarketingPersonDashboard() {
             <span className="brand-sub">Marketing portal</span>
           </div>
         </div>
-        <button className="secondary" style={{ width: "auto", padding: "8px 16px" }} onClick={handleLogout}>
-          <LogOut size={15} />Log out
+        <button style={{ width: "auto", padding: "8px 16px" }} onClick={() => { setLeadSuccess(""); setShowLeadForm(true); }}>
+          <UserPlus size={16} />New lead
         </button>
       </div>
 
       <div className="container" style={{ maxWidth: 1000 }}>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 12, marginBottom: 20 }}>
-          <div className="card" style={{ padding: 16 }}>
-            <div style={{ fontSize: 12, color: "var(--ink-soft)", fontWeight: 700, textTransform: "uppercase" }}>Your leaders</div>
-            <div style={{ fontSize: 24, fontWeight: 700 }}>{data.leaders.length}</div>
-          </div>
-          <div className="card" style={{ padding: 16 }}>
-            <div style={{ fontSize: 12, color: "var(--ink-soft)", fontWeight: 700, textTransform: "uppercase" }}>Total leads</div>
-            <div style={{ fontSize: 24, fontWeight: 700 }}>{data.totalReferrals}</div>
-          </div>
-          <div className="card" style={{ padding: 16 }}>
-            <div style={{ fontSize: 12, color: "var(--ink-soft)", fontWeight: 700, textTransform: "uppercase" }}>Total credited</div>
-            <div style={{ fontSize: 24, fontWeight: 700 }}>{data.totalCredited.toFixed(2)} pts</div>
-          </div>
-        </div>
-
-        <div className="card" style={{ marginBottom: 20 }}>
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, flexWrap: "wrap" }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-              <UserPlus size={16} color="var(--teal-600)" />
-              <h4 style={{ margin: 0 }}>Submit a lead</h4>
+        <div style={{ display: "flex", gap: 8, marginBottom: 20 }}>
+          <button
+            type="button"
+            className="card"
+            onClick={() => setShowLeadersModal(true)}
+            style={{ padding: "10px 8px", flex: 1, minWidth: 0, textAlign: "left", cursor: "pointer", display: "flex", flexDirection: "column", alignItems: "flex-start" }}
+          >
+            <div style={{ display: "flex", alignItems: "center", gap: 2, fontSize: 10, color: "var(--ink-soft)", fontWeight: 700, textTransform: "uppercase" }}>
+              Your leaders<ChevronRight size={12} />
             </div>
-            {!showLeadForm && (
-              <button style={{ width: "auto", padding: "7px 14px" }} onClick={() => { setLeadSuccess(""); setShowLeadForm(true); }}>
-                <UserPlus size={15} />New lead
-              </button>
-            )}
+            <div style={{ fontSize: 19, fontWeight: 700 }}>{data.leaders.length}</div>
+          </button>
+          <div className="card" style={{ padding: "10px 8px", flex: 1, minWidth: 0 }}>
+            <div style={{ fontSize: 10, color: "var(--ink-soft)", fontWeight: 700, textTransform: "uppercase" }}>Total leads</div>
+            <div style={{ fontSize: 19, fontWeight: 700 }}>{data.totalReferrals}</div>
           </div>
-          {!showLeadForm && (
-            <p style={{ fontSize: 13, color: "var(--ink-soft)", margin: "6px 0 0" }}>
-              Bringing in a patient yourself? Submit it here — it'll show up as Pending for reception to confirm, same as a leader's own QR submission. If you attach a card photo, reception verifies the card first.
-            </p>
-          )}
-          {leadSuccess && !showLeadForm && <p style={{ color: "var(--teal-700)", fontSize: 13.5, marginTop: 10, marginBottom: 0 }}>{leadSuccess}</p>}
-
-          {showLeadForm && (
-            <form onSubmit={handleSubmitLead} style={{ marginTop: 14 }}>
-              <label>Which leader passed you this lead?</label>
-              <select value={leaderChoice} onChange={(e) => setLeaderChoice(e.target.value)} required>
-                <option value="">— Select a leader —</option>
-                {data.leaders.map((l) => (
-                  <option key={l.id} value={l.id}>{l.name}{l.clinicName ? ` (${l.clinicName})` : ""}</option>
-                ))}
-                <option value="__new__">+ Someone not in this list</option>
-              </select>
-              {leaderChoice === "__new__" && (
-                <>
-                  <label>New leader's name</label>
-                  <input value={newLeaderName} onChange={(e) => setNewLeaderName(e.target.value)} required />
-                </>
-              )}
-
-              <label>Patient name</label>
-              <input value={leadName} onChange={(e) => setLeadName(e.target.value)} required />
-
-              <label>Patient age</label>
-              <input type="number" min="0" max="130" value={leadAge} onChange={(e) => setLeadAge(e.target.value)} required />
-
-              <label>Patient gender</label>
-              <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
-                {["MALE", "FEMALE", "OTHER"].map((g) => (
-                  <button
-                    key={g}
-                    type="button"
-                    className={leadGender === g ? "" : "secondary"}
-                    style={{ width: "auto", flex: 1, padding: "8px 0" }}
-                    onClick={() => setLeadGender(g)}
-                  >
-                    {g.charAt(0) + g.slice(1).toLowerCase()}
-                  </button>
-                ))}
-              </div>
-
-              <label>Patient phone (optional)</label>
-              <input value={leadPhone} onChange={(e) => setLeadPhone(e.target.value)} placeholder="e.g. 98765 43210" />
-
-              <label>Panel (optional)</label>
-              <select value={leadPanel} onChange={(e) => setLeadPanel(e.target.value)}>
-                <option value="">— None —</option>
-                {PANEL_OPTIONS.map((p) => <option key={p} value={p}>{p}</option>)}
-              </select>
-
-              <label>ID number (optional)</label>
-              <input value={leadIdNumber} onChange={(e) => setLeadIdNumber(e.target.value)} placeholder="Aadhaar, Ayushman, CGHS/ECHS/CAPF card number, etc." />
-
-              <label>Force / category (optional)</label>
-              <input value={leadForceType} onChange={(e) => setLeadForceType(e.target.value)} placeholder="e.g. Cash Patient, Ayushman Bharat, BSF, Pensioner" />
-
-              <label>Ward type (optional)</label>
-              <input value={leadWardType} onChange={(e) => setLeadWardType(e.target.value)} placeholder="e.g. General Ward, Semi-Private Ward, ICU, NICU" />
-
-              <label>Attach a card photo (optional)</label>
-              <input
-                type="file"
-                accept="image/*,.pdf"
-                onChange={(e) => setAttachmentFile(e.target.files?.[0] || null)}
-              />
-              <p style={{ fontSize: 11.5, color: "var(--ink-soft)", marginTop: -6, marginBottom: 8 }}>
-                <Paperclip size={11} style={{ verticalAlign: "middle", marginRight: 3 }} />
-                A photo of their ID/insurance card (e.g. Ayushman), a prescription, anything useful as proof of the lead. If you attach a card photo, reception will check it's active before the lead moves to Pending.
-              </p>
-
-              {leadError && <p className="error">{leadError}</p>}
-
-              <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
-                <button type="submit" disabled={submittingLead}>{submittingLead ? "Submitting…" : "Submit lead"}</button>
-                <button type="button" className="secondary" onClick={() => { resetLeadForm(); setLeadError(""); setShowLeadForm(false); }}>Cancel</button>
-              </div>
-            </form>
-          )}
+          <div className="card" style={{ padding: "10px 8px", flex: 1, minWidth: 0 }}>
+            <div style={{ fontSize: 10, color: "var(--ink-soft)", fontWeight: 700, textTransform: "uppercase" }}>Total credited</div>
+            <div style={{ fontSize: 19, fontWeight: 700 }}>{data.totalCredited.toFixed(2)} <span style={{ fontSize: 12, fontWeight: 600 }}>pts</span></div>
+          </div>
         </div>
+
+        {leadSuccess && <p style={{ color: "var(--teal-700)", fontSize: 13.5, marginBottom: 20 }}>{leadSuccess}</p>}
 
         <div className="card" style={{ marginBottom: 20 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
@@ -348,11 +265,15 @@ export default function MarketingPersonDashboard() {
           </div>
         </div>
 
-        <div className="card">
-          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
-            <Users size={16} color="var(--teal-600)" />
-            <h4 style={{ margin: 0 }}>Your leaders</h4>
-          </div>
+        <div style={{ marginTop: 8 }}>
+          <button className="secondary" style={{ width: "auto", padding: "8px 16px" }} onClick={handleLogout}>
+            <LogOut size={15} />Log out
+          </button>
+        </div>
+      </div>
+
+      {showLeadersModal && (
+        <Modal title="Your leaders" onClose={() => setShowLeadersModal(false)} width={560}>
           {data.leaders.length === 0 ? (
             <p style={{ color: "var(--ink-soft)", fontSize: 14 }}>No leaders associated with you yet — ask your admin.</p>
           ) : (
@@ -374,8 +295,106 @@ export default function MarketingPersonDashboard() {
               </table>
             </div>
           )}
-        </div>
-      </div>
+        </Modal>
+      )}
+
+      {showLeadForm && (
+        <Modal title="Submit a lead" onClose={() => { if (!submittingLead) { resetLeadForm(); setLeadError(""); setShowLeadForm(false); } }} width={480}>
+          <form onSubmit={handleSubmitLead}>
+            <label>Which leader passed you this lead?</label>
+            <select value={leaderChoice} onChange={(e) => setLeaderChoice(e.target.value)} required>
+              <option value="">— Select a leader —</option>
+              {data.leaders.map((l) => (
+                <option key={l.id} value={l.id}>{l.name}{l.clinicName ? ` (${l.clinicName})` : ""}</option>
+              ))}
+              <option value="__new__">+ Someone not in this list</option>
+            </select>
+            {leaderChoice === "__new__" && (
+              <>
+                <label>New leader's name</label>
+                <input value={newLeaderName} onChange={(e) => setNewLeaderName(e.target.value)} required />
+              </>
+            )}
+
+            <label>Patient name</label>
+            <input value={leadName} onChange={(e) => setLeadName(e.target.value)} required />
+
+            <label>Birth year</label>
+            <select value={birthYear} onChange={(e) => setBirthYear(e.target.value)} required>
+              <option value="">— Select birth year —</option>
+              {BIRTH_YEARS.map((y) => <option key={y} value={y}>{y}</option>)}
+            </select>
+            {computedAge !== "" && (
+              <p style={{ fontSize: 12.5, color: "var(--ink-soft)", marginTop: -6, marginBottom: 10 }}>Age: {computedAge} yrs</p>
+            )}
+
+            <label>Patient gender</label>
+            <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
+              {["MALE", "FEMALE", "OTHER"].map((g) => (
+                <button
+                  key={g}
+                  type="button"
+                  className={leadGender === g ? "" : "secondary"}
+                  style={{ width: "auto", flex: 1, padding: "8px 0" }}
+                  onClick={() => setLeadGender(g)}
+                >
+                  {g.charAt(0) + g.slice(1).toLowerCase()}
+                </button>
+              ))}
+            </div>
+
+            <label>Panel (optional)</label>
+            <select value={leadPanel} onChange={(e) => setLeadPanel(e.target.value)}>
+              <option value="">— None —</option>
+              {PANEL_OPTIONS.map((p) => <option key={p} value={p}>{p}</option>)}
+            </select>
+
+            <label>Card photo (optional)</label>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="image/*,.pdf"
+              style={{ display: "none" }}
+              onChange={(e) => setAttachmentFile(e.target.files?.[0] || null)}
+            />
+            <input
+              ref={cameraInputRef}
+              type="file"
+              accept="image/*"
+              capture="environment"
+              style={{ display: "none" }}
+              onChange={(e) => setAttachmentFile(e.target.files?.[0] || null)}
+            />
+            <div style={{ display: "flex", gap: 8, marginBottom: 6 }}>
+              <button type="button" className="secondary" style={{ flex: 1, padding: "8px 0" }} onClick={() => fileInputRef.current?.click()}>
+                <FileImage size={15} />Choose file
+              </button>
+              <button type="button" className="secondary" style={{ flex: 1, padding: "8px 0" }} onClick={() => cameraInputRef.current?.click()}>
+                <Camera size={15} />Take photo
+              </button>
+            </div>
+            {attachmentFile && (
+              <p style={{ fontSize: 12.5, color: "var(--ink-soft)", marginTop: 0, marginBottom: 8, display: "flex", alignItems: "center", gap: 6 }}>
+                <Paperclip size={12} />{attachmentFile.name}
+                <button type="button" className="secondary" style={{ width: "auto", padding: "2px 6px", marginLeft: "auto" }} onClick={() => setAttachmentFile(null)}>
+                  <X size={12} />
+                </button>
+              </p>
+            )}
+            <p style={{ fontSize: 11.5, color: "var(--ink-soft)", marginTop: -2, marginBottom: 8 }}>
+              A photo of their ID/insurance card (e.g. Ayushman). If you attach one, reception will check it's active before the lead moves to Pending.
+            </p>
+
+            {leadError && <p className="error">{leadError}</p>}
+
+            <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+              <button type="submit" disabled={submittingLead}>{submittingLead ? "Submitting…" : "Submit lead"}</button>
+              <button type="button" className="secondary" onClick={() => { resetLeadForm(); setLeadError(""); setShowLeadForm(false); }}>Cancel</button>
+            </div>
+          </form>
+        </Modal>
+      )}
     </div>
   );
 }
+
