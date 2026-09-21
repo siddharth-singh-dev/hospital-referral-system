@@ -461,9 +461,9 @@ export default function AdminDashboard() {
     setConfirmModal(referral);
   }
 
-  async function handleConfirmLead({ fileNumber, visitType }) {
+  async function handleConfirmLead({ fileNumber, visitType, idNumber }) {
     const referral = confirmModal;
-    await api.post(`/referrals/${referral.id}/arrive`, { fileNumber, visitType });
+    await api.post(`/referrals/${referral.id}/arrive`, { fileNumber, visitType, idNumber });
     setMessage(`Patient confirmed as ${visitType} (File No. ${fileNumber}) — credited to ${referral.doctor?.name}.`);
     setConfirmModal(null);
     loadReferrals();
@@ -1896,6 +1896,7 @@ export default function AdminDashboard() {
         <ConfirmLeadModal
           patientName={confirmModal.patientName}
           doctorName={confirmModal.doctor?.name}
+          initialIdNumber={confirmModal.idNumber}
           onClose={() => setConfirmModal(null)}
           onConfirm={handleConfirmLead}
         />

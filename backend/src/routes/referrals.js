@@ -1128,7 +1128,7 @@ function isMaskedAadhaar(idNumber) {
 // OPD visit; the credited amount is derived from the hospital's admin-fixed IPD/OPD
 // amounts, not entered manually, so it can no longer be overridden per referral.
 router.post("/:id/arrive", requireAuth, requireAccess(["ADMIN", "RECEPTION"], ["MANAGE_REFERRALS"]), async (req, res) => {
-  const { fileNumber, visitType } = req.body || {};
+  const { fileNumber, visitType, idNumber: bodyIdNumber } = req.body || {};
 
   if (!fileNumber || !String(fileNumber).trim()) {
     return res.status(400).json({ error: "A file number is required to confirm this lead" });
@@ -1146,13 +1146,25 @@ router.post("/:id/arrive", requireAuth, requireAccess(["ADMIN", "RECEPTION"], ["
     return res.status(400).json({ error: `Referral is already ${referral.status.toLowerCase()}` });
   }
 
+  // A card/ID number is mandatory at the point of admission — without one, the
+  // already-admitted-elsewhere check just below (the whole reason this is enforced) has
+  // nothing to compare against. Whatever was captured earlier at submission (if anything)
+  // can still be corrected here; reception must supply one if none exists yet.
+  const finalIdNumber = (bodyIdNumber?.trim() || referral.idNumber?.trim() || "");
+  if (!finalIdNumber) {
+    return res.status(400).json({ error: "A card/ID number is required to confirm this lead" });
+  }
+  if (normalizeIdNumber(finalIdNumber).length < 4) {
+    return res.status(400).json({ error: "Please enter a valid card/ID number" });
+  }
+
   // Same card/ID number already sitting on an active (credited, not-yet-discharged) referral
   // elsewhere in this hospital — almost certainly the same patient submitted twice, whether
   // by accident or via two different leaders/marketing employees. Block the confirm rather
   // than double-crediting a doctor (or two doctors) for one admission; reception discharges
   // the existing visit first if this really is a separate, later visit.
-  const normalizedId = normalizeIdNumber(referral.idNumber);
-  if (normalizedId && normalizedId.length >= 6 && !isMaskedAadhaar(referral.idNumber)) {
+  const normalizedId = normalizeIdNumber(finalIdNumber);
+  if (normalizedId.length >= 6 && !isMaskedAadhaar(finalIdNumber)) {
     const activeCandidates = await prisma.referral.findMany({
       where: {
         id: { not: referral.id },
@@ -1186,6 +1198,7 @@ router.post("/:id/arrive", requireAuth, requireAccess(["ADMIN", "RECEPTION"], ["
         matchedByUserId: req.user.id,
         fileNumber: String(fileNumber).trim(),
         visitType,
+        idNumber: finalIdNumber,
       },
     });
 

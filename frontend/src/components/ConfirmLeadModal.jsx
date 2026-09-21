@@ -3,14 +3,17 @@ import { CheckCircle2 } from "lucide-react";
 import Modal from "./Modal";
 import api from "../api/client";
 
-// Confirms a lead's arrival: reception records the visit's IPD/OPD file number and
-// whether this was an IPD or OPD visit. The credited amount is fixed by the admin per
-// visit type — it is shown here for transparency but can't be edited from this screen.
-export default function ConfirmLeadModal({ patientName, doctorName, onClose, onConfirm }) {
+// Confirms a lead's arrival: reception records the visit's IPD/OPD file number, whether this
+// was an IPD or OPD visit, and the patient's card/ID number (required — this is what powers
+// the already-admitted-elsewhere check on the backend; without it that check has nothing to
+// compare against). The credited amount is fixed by the admin per visit type — it is shown
+// here for transparency but can't be edited from this screen.
+export default function ConfirmLeadModal({ patientName, doctorName, initialIdNumber, onClose, onConfirm }) {
   const [amounts, setAmounts] = useState(null);
   const [loadingAmounts, setLoadingAmounts] = useState(true);
   const [fileNumber, setFileNumber] = useState("");
   const [visitType, setVisitType] = useState("OPD");
+  const [idNumber, setIdNumber] = useState(initialIdNumber || "");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
 
@@ -34,9 +37,13 @@ export default function ConfirmLeadModal({ patientName, doctorName, onClose, onC
       setError(`Please enter the ${visitType} file number.`);
       return;
     }
+    if (!idNumber.trim()) {
+      setError("Please enter the patient's card/ID number.");
+      return;
+    }
     setSubmitting(true);
     try {
-      await onConfirm({ fileNumber: fileNumber.trim(), visitType });
+      await onConfirm({ fileNumber: fileNumber.trim(), visitType, idNumber: idNumber.trim() });
     } catch (err) {
       setError(err?.response?.data?.error || "Failed to confirm this lead.");
       setSubmitting(false);
@@ -69,6 +76,12 @@ export default function ConfirmLeadModal({ patientName, doctorName, onClose, onC
 
         <label>{visitType} file number</label>
         <input value={fileNumber} onChange={(e) => setFileNumber(e.target.value)} placeholder={`e.g. ${visitType}-00123`} autoFocus required />
+
+        <label>Card / ID number</label>
+        <input value={idNumber} onChange={(e) => setIdNumber(e.target.value)} placeholder="Aadhaar, Ayushman, CGHS/ECHS/CAPF card number, etc." required />
+        <p style={{ fontSize: 11.5, color: "var(--ink-soft)", marginTop: -6, marginBottom: 10 }}>
+          Required — used to catch the same patient being admitted twice before they're discharged.
+        </p>
 
         <p style={{ fontSize: 13, color: "var(--ink-soft)" }}>
           {loadingAmounts
