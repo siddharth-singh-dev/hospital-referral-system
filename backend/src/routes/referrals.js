@@ -1108,6 +1108,21 @@ router.get("/export/pdf", requireAuth, requireAccess(["ADMIN"], ["EXPORT_REPORTS
   doc.end();
 });
 
+// Strips everything but letters/digits and uppercases, so two entries of "the same" card
+// number typed/read with different spacing ("BR 0000 0191 6229" vs "BR0000-0191-6229") still
+// compare equal.
+function normalizeIdNumber(v) {
+  return (v || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+}
+
+// A masked Aadhaar number ("XXXX XXXX 1234") only carries 4 real digits — two different
+// patients whose Aadhaar numbers happen to share the same last 4 digits produce the exact
+// same masked string, so this shape is too collision-prone to trust for duplicate-admission
+// matching. Ayushman/CGHS/ECHS/CAPF numbers aren't masked and don't have this problem.
+function isMaskedAadhaar(idNumber) {
+  return /^X{8}\d{4}$/.test(normalizeIdNumber(idNumber));
+}
+
 // POST /api/referrals/:id/arrive  (reception + admin) - confirm patient match, credit the doctor.
 // Reception must record the patient's IPD/OPD file number and whether this was an IPD or
 // OPD visit; the credited amount is derived from the hospital's admin-fixed IPD/OPD
@@ -1129,6 +1144,31 @@ router.post("/:id/arrive", requireAuth, requireAccess(["ADMIN", "RECEPTION"], ["
   if (!referral) return res.status(404).json({ error: "Referral not found" });
   if (referral.status !== "PENDING") {
     return res.status(400).json({ error: `Referral is already ${referral.status.toLowerCase()}` });
+  }
+
+  // Same card/ID number already sitting on an active (credited, not-yet-discharged) referral
+  // elsewhere in this hospital — almost certainly the same patient submitted twice, whether
+  // by accident or via two different leaders/marketing employees. Block the confirm rather
+  // than double-crediting a doctor (or two doctors) for one admission; reception discharges
+  // the existing visit first if this really is a separate, later visit.
+  const normalizedId = normalizeIdNumber(referral.idNumber);
+  if (normalizedId && normalizedId.length >= 6 && !isMaskedAadhaar(referral.idNumber)) {
+    const activeCandidates = await prisma.referral.findMany({
+      where: {
+        id: { not: referral.id },
+        doctor: { hospitalId: req.user.hospitalId },
+        status: "CREDITED",
+        dischargedAt: null,
+        idNumber: { not: null },
+      },
+      include: { doctor: true },
+    });
+    const activeAdmission = activeCandidates.find((c) => normalizeIdNumber(c.idNumber) === normalizedId);
+    if (activeAdmission) {
+      return res.status(409).json({
+        error: `Already admitted, not yet discharged — ${activeAdmission.patientName} (File No. ${activeAdmission.fileNumber}, via ${activeAdmission.doctor.name}). Discharge that visit first if this is genuinely a new one, or this looks like a duplicate lead.`,
+      });
+    }
   }
 
   const hospital = await prisma.hospital.findUnique({

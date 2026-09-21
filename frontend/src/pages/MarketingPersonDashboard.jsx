@@ -73,9 +73,12 @@ export default function MarketingPersonDashboard() {
     setAttachmentCardType(meta.cardType);
     if (ocrResult) {
       if (ocrResult.patientName) setLeadName(ocrResult.patientName);
-      if (ocrResult.dob) {
-        const year = ocrResult.dob.match(/^(\d{4})-/)?.[1];
-        if (year) setBirthYear(year);
+      // dob can arrive as ISO (1943-11-26), Indian-format (26/11/1943), or "26 Nov 1943" —
+      // pull the 4-digit year out regardless of which; only fall back to age if that fails,
+      // rather than skipping the fallback just because *a* dob string was present.
+      const yearFromDob = ocrResult.dob?.match(/^(\d{4})-/)?.[1] || ocrResult.dob?.match(/(\d{4})\s*$/)?.[1];
+      if (yearFromDob) {
+        setBirthYear(yearFromDob);
       } else if (ocrResult.patientAge) {
         setBirthYear(String(CURRENT_YEAR - ocrResult.patientAge));
       }
