@@ -1476,13 +1476,19 @@ router.delete("/:id", requireAuth, requireRole("ADMIN"), async (req, res) => {
 
 // POST /api/referrals/marketing-submit  (marketing person's own portal only) — a marketing
 // employee submits a lead directly, on behalf of one of their own leaders. multipart/form-data
-// so an optional supporting image (ID card, prescription, whatever proof they want attached)
-// can come along in the same request.
+// so a supporting photo (a card, a prescription, whatever proof they have) can come along in
+// the same request, alongside which type of document it is (cardType — one of the OCR card
+// types, or "OTHER" for anything OCR can't read, like a prescription).
 //
-// If a card photo is attached, the lead lands as CARD_REVIEW instead of PENDING — reception
-// has to check the card and mark it active (-> PENDING) or inactive (-> REJECTED) before it
-// enters the normal confirm/credit flow. A lead submitted with no photo skips this and goes
-// straight to PENDING, same as before.
+// Only an AYUSHMAN card sends the lead to CARD_REVIEW — reception has to check that specific
+// card and mark it active (-> PENDING) or inactive (-> REJECTED) before it enters the normal
+// confirm/credit flow, every single time, regardless of whether an identical card was verified
+// active on a past referral (scheme status can lapse, and never trusting a photo of someone
+// else's already-approved card closes an easy way to game the check). Every other card type —
+// CGHS/ECHS/CAPF/Aadhaar/Other — carries no such requirement; its photo just attaches as-is
+// and the lead goes straight to PENDING, same as a leader's own QR submission, so reception can
+// still eyeball/cross-check it themselves without it blocking the queue.
+const CARD_TYPES_FOR_SUBMIT = ["AADHAAR", "AYUSHMAN", "CGHS", "ECHS", "CAPF", "OTHER"];
 router.post("/marketing-submit", requireAuth, requireRole("MARKETING"), uploadAttachment.single("attachment"), async (req, res) => {
   const body = req.body || {};
   const patientName = (body.patientName || "").trim();
@@ -1490,6 +1496,7 @@ router.post("/marketing-submit", requireAuth, requireRole("MARKETING"), uploadAt
   const patientGender = body.patientGender;
   const leaderId = (body.leaderId || "").trim();
   const newLeaderName = (body.newLeaderName || "").trim();
+  const cardType = (body.cardType || "").trim().toUpperCase();
 
   if (!patientName) return res.status(400).json({ error: "Patient name is required" });
   if (!Number.isInteger(patientAge) || patientAge <= 0 || patientAge > 130) {
@@ -1500,6 +1507,9 @@ router.post("/marketing-submit", requireAuth, requireRole("MARKETING"), uploadAt
   }
   if (!leaderId && !newLeaderName) {
     return res.status(400).json({ error: "Tell us which leader passed you this lead — pick one from your list or type a new name" });
+  }
+  if (req.file && !CARD_TYPES_FOR_SUBMIT.includes(cardType)) {
+    return res.status(400).json({ error: `Select what kind of card/document this photo is (${CARD_TYPES_FOR_SUBMIT.join(", ")})` });
   }
 
   let doctor;
@@ -1514,7 +1524,7 @@ router.post("/marketing-submit", requireAuth, requireRole("MARKETING"), uploadAt
     });
   }
 
-  const hasCardPhoto = Boolean(req.file);
+  const isAyushman = req.file && cardType === "AYUSHMAN";
 
   const referral = await prisma.referral.create({
     data: {
@@ -1524,11 +1534,12 @@ router.post("/marketing-submit", requireAuth, requireRole("MARKETING"), uploadAt
       patientGender,
       patientPhone: body.patientPhone?.trim() || null,
       panel: normalizePanel(body.panel),
+      idType: req.file ? cardType : null,
       idNumber: body.idNumber?.trim() || null,
       forceType: body.forceType?.trim() || null,
       wardType: body.wardType?.trim() || null,
       attachmentPath: req.file ? path.basename(req.file.path) : null,
-      status: hasCardPhoto ? "CARD_REVIEW" : "PENDING",
+      status: isAyushman ? "CARD_REVIEW" : "PENDING",
     },
   });
 
@@ -1538,21 +1549,21 @@ router.post("/marketing-submit", requireAuth, requireRole("MARKETING"), uploadAt
     entityType: "Referral",
     entityId: referral.id,
     entityLabel: patientName,
-    metadata: { doctorId: doctor.id, doctorName: doctor.name, newLeaderCreated: !leaderId, hadAttachment: hasCardPhoto },
+    metadata: { doctorId: doctor.id, doctorName: doctor.name, newLeaderCreated: !leaderId, cardType: req.file ? cardType : null },
   });
 
   notify({
     hospitalId: req.user.hospitalId,
-    type: hasCardPhoto ? NOTIFICATION_TYPES.CARD_REVIEW_NEW : NOTIFICATION_TYPES.PENDING_NEW,
-    message: hasCardPhoto
+    type: isAyushman ? NOTIFICATION_TYPES.CARD_REVIEW_NEW : NOTIFICATION_TYPES.PENDING_NEW,
+    message: isAyushman
       ? `New card to verify — ${patientName} (via ${doctor.name})`
       : `New pending lead — ${patientName} (via ${doctor.name})`,
     referralId: referral.id,
   });
 
   res.status(201).json({
-    message: hasCardPhoto
-      ? "Lead submitted — reception will verify the card before it moves to Pending."
+    message: isAyushman
+      ? "Lead submitted — reception will verify the Ayushman card before it moves to Pending."
       : "Lead submitted — it'll show up as Pending until reception confirms it.",
     referralId: referral.id,
     doctorName: doctor.name,

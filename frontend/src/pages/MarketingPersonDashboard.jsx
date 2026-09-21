@@ -1,9 +1,10 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
 import axios from "axios";
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid } from "recharts";
-import { Lock, TrendingUp, LogOut, UserPlus, Paperclip, FileImage, Camera, ChevronRight, X } from "lucide-react";
+import { Lock, TrendingUp, LogOut, UserPlus, Paperclip, ChevronRight, X } from "lucide-react";
 import Modal from "../components/Modal";
+import CardScanUpload from "../components/CardScanUpload";
 import { PANEL_OPTIONS } from "../utils/panels";
 
 const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:4000/api";
@@ -46,11 +47,10 @@ export default function MarketingPersonDashboard() {
   const [leadGender, setLeadGender] = useState("MALE");
   const [leadPanel, setLeadPanel] = useState("");
   const [attachmentFile, setAttachmentFile] = useState(null);
+  const [attachmentCardType, setAttachmentCardType] = useState("");
   const [submittingLead, setSubmittingLead] = useState(false);
   const [leadError, setLeadError] = useState("");
   const [leadSuccess, setLeadSuccess] = useState("");
-  const fileInputRef = useRef(null);
-  const cameraInputRef = useRef(null);
 
   const computedAge = birthYear ? CURRENT_YEAR - Number(birthYear) : "";
 
@@ -62,6 +62,26 @@ export default function MarketingPersonDashboard() {
     setLeadGender("MALE");
     setLeadPanel("");
     setAttachmentFile(null);
+    setAttachmentCardType("");
+  }
+
+  // Called by CardScanUpload once a photo's been captured/chosen — `ocrResult` is the OCR
+  // read (null if the type was "Other" or the read failed), `meta.file`/`meta.cardType` are
+  // always present regardless, since the photo itself should still attach either way.
+  function handleCardScanned(ocrResult, meta) {
+    setAttachmentFile(meta.file);
+    setAttachmentCardType(meta.cardType);
+    if (ocrResult) {
+      if (ocrResult.patientName) setLeadName(ocrResult.patientName);
+      if (ocrResult.dob) {
+        const year = ocrResult.dob.match(/^(\d{4})-/)?.[1];
+        if (year) setBirthYear(year);
+      } else if (ocrResult.patientAge) {
+        setBirthYear(String(CURRENT_YEAR - ocrResult.patientAge));
+      }
+      if (ocrResult.patientGender) setLeadGender(ocrResult.patientGender);
+      if (ocrResult.panel) setLeadPanel(ocrResult.panel);
+    }
   }
 
   async function handleSubmitLead(e) {
@@ -88,7 +108,10 @@ export default function MarketingPersonDashboard() {
       if (leadPanel) formData.append("panel", leadPanel);
       if (leaderChoice === "__new__") formData.append("newLeaderName", newLeaderName.trim());
       else formData.append("leaderId", leaderChoice);
-      if (attachmentFile) formData.append("attachment", attachmentFile);
+      if (attachmentFile) {
+        formData.append("attachment", attachmentFile);
+        formData.append("cardType", attachmentCardType);
+      }
 
       const res = await axios.post(`${API_BASE}/referrals/marketing-submit`, formData, {
         headers: { Authorization: `Bearer ${token}` },
@@ -349,40 +372,23 @@ export default function MarketingPersonDashboard() {
               {PANEL_OPTIONS.map((p) => <option key={p} value={p}>{p}</option>)}
             </select>
 
-            <label>Card photo (optional)</label>
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept="image/*,.pdf"
-              style={{ display: "none" }}
-              onChange={(e) => setAttachmentFile(e.target.files?.[0] || null)}
-            />
-            <input
-              ref={cameraInputRef}
-              type="file"
-              accept="image/*"
-              capture="environment"
-              style={{ display: "none" }}
-              onChange={(e) => setAttachmentFile(e.target.files?.[0] || null)}
-            />
-            <div style={{ display: "flex", gap: 8, marginBottom: 6 }}>
-              <button type="button" className="secondary" style={{ flex: 1, padding: "8px 0" }} onClick={() => fileInputRef.current?.click()}>
-                <FileImage size={15} />Choose file
-              </button>
-              <button type="button" className="secondary" style={{ flex: 1, padding: "8px 0" }} onClick={() => cameraInputRef.current?.click()}>
-                <Camera size={15} />Take photo
-              </button>
-            </div>
+            <label>Card / document photo (optional)</label>
+            <CardScanUpload authToken={token} onExtracted={handleCardScanned} />
             {attachmentFile && (
-              <p style={{ fontSize: 12.5, color: "var(--ink-soft)", marginTop: 0, marginBottom: 8, display: "flex", alignItems: "center", gap: 6 }}>
-                <Paperclip size={12} />{attachmentFile.name}
-                <button type="button" className="secondary" style={{ width: "auto", padding: "2px 6px", marginLeft: "auto" }} onClick={() => setAttachmentFile(null)}>
+              <p style={{ fontSize: 12.5, color: "var(--ink-soft)", marginTop: -10, marginBottom: 8, display: "flex", alignItems: "center", gap: 6 }}>
+                <Paperclip size={12} />Attached — {attachmentCardType === "OTHER" ? "other document" : `${attachmentCardType} card`}
+                <button
+                  type="button"
+                  className="secondary"
+                  style={{ width: "auto", padding: "2px 6px", marginLeft: "auto" }}
+                  onClick={() => { setAttachmentFile(null); setAttachmentCardType(""); }}
+                >
                   <X size={12} />
                 </button>
               </p>
             )}
             <p style={{ fontSize: 11.5, color: "var(--ink-soft)", marginTop: -2, marginBottom: 8 }}>
-              A photo of their ID/insurance card (e.g. Ayushman). If you attach one, reception will check it's active before the lead moves to Pending.
+              Only an Ayushman card needs reception to verify it before the lead moves to Pending — every other type (or no photo at all) goes straight to Pending.
             </p>
 
             {leadError && <p className="error">{leadError}</p>}

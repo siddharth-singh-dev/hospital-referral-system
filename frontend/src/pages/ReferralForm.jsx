@@ -58,6 +58,7 @@ export default function ReferralForm() {
   const CARD_LABELS = { AADHAAR: "Aadhaar", AYUSHMAN: "Ayushman", CGHS: "CGHS", ECHS: "ECHS", CAPF: "CAPF" };
 
   function handleScanExtracted(result) {
+    if (!result) return; // OCR failed, or wasn't attempted (e.g. "Other" was picked) — nothing to prefill
     if (result.patientName) setName(result.patientName);
     if (result.patientAge) setAge(String(result.patientAge));
     if (result.patientGender) setGender(result.patientGender);

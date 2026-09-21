@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { ScanLine, Camera, Loader2, AlertTriangle, X, RotateCw, Check } from "lucide-react";
 import Modal from "./Modal";
 import api from "../api/client";
+import axios from "axios";
 
 const CARD_TYPES = [
   { value: "AADHAAR", label: "Aadhaar card" },
@@ -9,6 +10,7 @@ const CARD_TYPES = [
   { value: "CGHS", label: "CGHS card" },
   { value: "ECHS", label: "ECHS card" },
   { value: "CAPF", label: "CAPF card" },
+  { value: "OTHER", label: "Other (prescription, etc.)" },
 ];
 
 // The OCR provider's free tier caps uploads at 1MB, but phone camera photos routinely come
@@ -66,13 +68,25 @@ const CAN_USE_CAMERA = typeof navigator !== "undefined" && !!navigator.mediaDevi
 
 // Lets someone upload/photograph an ID or health-scheme card and have the name/age/gender
 // (and, for scheme cards, the billing panel) prefilled automatically via OCR, instead of
-// typing them in by hand. Works two ways:
+// typing them in by hand. Works three ways:
 //   - Pass `doctorCode` for the public leader-facing referral form (no login).
-//   - Omit it when used inside an already-authenticated screen (e.g. Add Patient) — the
-//     shared axios client attaches the staff auth token automatically.
+//   - Pass `authToken` for a caller with its own separate token scheme that isn't the shared
+//     staff login (e.g. the marketing person portal, which keeps its own per-person token in
+//     localStorage rather than the "token" key the shared `api` client reads) — this bypasses
+//     `api` entirely for the OCR call so it's never accidentally sent with an unrelated staff
+//     token that might also be sitting in localStorage on the same browser/device.
+//   - Omit both when used inside an already-authenticated staff screen (e.g. Add Patient) —
+//     the shared axios client attaches the staff auth token automatically.
 // Extracted fields are always handed back for the person to review/edit, never auto-applied
 // silently — a card photo OCR read is a starting point, not a guarantee.
-export default function CardScanUpload({ doctorCode, onExtracted }) {
+//
+// "Other" (prescriptions, anything OCR can't read) skips the OCR call entirely — onExtracted
+// still fires so the caller gets the photo itself, just with `data` as null.
+//
+// onExtracted(data, meta) — data is the OCR result (or null for "Other"/on failure before a
+// result exists), meta is always { file, cardType } so a caller that also needs to attach the
+// underlying photo (not just the OCR text) can do so, regardless of whether OCR succeeded.
+export default function CardScanUpload({ doctorCode, authToken, onExtracted }) {
   const [cardType, setCardType] = useState("AADHAAR");
   const [scanning, setScanning] = useState(false);
   const [error, setError] = useState("");
@@ -107,6 +121,16 @@ export default function CardScanUpload({ doctorCode, onExtracted }) {
   // it as-is — this function does NOT do any further image processing itself, precisely to
   // avoid a second lossy re-encode on top of the one confirmPreview already did.
   async function processAndUpload(processedBlob) {
+    const file = new File([processedBlob], "card.jpg", { type: "image/jpeg" });
+
+    // "Other" isn't a real OCR card type — there's nothing to read, so skip the API call and
+    // just hand the photo straight back. Still goes through onExtracted (with data: null) so
+    // a caller relying on it to know "a file is ready" behaves the same either way.
+    if (cardType === "OTHER") {
+      onExtracted(null, { file, cardType });
+      return;
+    }
+
     setScanning(true);
     setError("");
     try {
@@ -115,12 +139,27 @@ export default function CardScanUpload({ doctorCode, onExtracted }) {
       formData.append("cardType", cardType);
       if (doctorCode) formData.append("doctorCode", doctorCode);
 
-      const { data } = await api.post("/ocr/extract-card", formData, {
-        headers: { "Content-Type": "multipart/form-data" },
-      });
-      onExtracted(data);
+      let data;
+      if (authToken) {
+        // Deliberately NOT using the shared `api` client here — its interceptor would attach
+        // whatever staff token is under localStorage["token"], overriding this one, if a
+        // hospital-staff login also happens to be open in the same browser.
+        const res = await axios.post(`${api.defaults.baseURL}/ocr/extract-card`, formData, {
+          headers: { "Content-Type": "multipart/form-data", Authorization: `Bearer ${authToken}` },
+        });
+        data = res.data;
+      } else {
+        const res = await api.post("/ocr/extract-card", formData, {
+          headers: { "Content-Type": "multipart/form-data" },
+        });
+        data = res.data;
+      }
+      onExtracted(data, { file, cardType });
     } catch (err) {
       setError(err?.response?.data?.error || "Could not read this card. Please enter the details manually.");
+      // Even on a failed read, the photo itself is still fine to attach — hand it back so the
+      // caller isn't forced to ask for the photo a second time just because OCR choked on it.
+      onExtracted(null, { file, cardType });
     } finally {
       setScanning(false);
     }
