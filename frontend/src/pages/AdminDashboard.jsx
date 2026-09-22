@@ -1727,7 +1727,7 @@ export default function AdminDashboard() {
                 </thead>
                 <tbody>
                   {referrals.map((r) => (
-                    <tr key={r.id} style={r.status === "CREDITED" && r.dischargedAt ? { background: "#f4f6fa" } : undefined}>
+                    <tr key={r.id} style={r.status === "CREDITED" && r.dischargedAt ? { background: "#fef3c7" } : undefined}>
                       <td>
                         <div className="cell-primary">{r.patientName}{r.attachmentPath && <AttachmentIcon referralId={r.id} />}</div>
                         <div className="cell-secondary">
@@ -1755,7 +1755,7 @@ export default function AdminDashboard() {
                         <select
                           value={r.panel || ""}
                           onChange={(e) => updatePanel(r.id, e.target.value)}
-                          style={{ minWidth: 120, fontSize: 12.5, padding: "5px 6px" }}
+                          style={{ width: 130, minWidth: 130, maxWidth: 130, fontSize: 12.5, padding: "5px 6px", margin: 0 }}
                         >
                           <option value="">— None —</option>
                           {PANEL_OPTIONS.map((p) => (

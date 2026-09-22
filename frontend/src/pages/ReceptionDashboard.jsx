@@ -28,6 +28,7 @@ export default function ReceptionDashboard() {
   const [doctorId, setDoctorId] = useState("");
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
+  const [admissionFilter, setAdmissionFilter] = useState(""); // "", "admitted", "discharged" — only relevant on the Credited tab
   const [doctors, setDoctors] = useState([]);
   const [referrals, setReferrals] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -38,6 +39,7 @@ export default function ReceptionDashboard() {
   const [showAddPatient, setShowAddPatient] = useState(false);
   const [editReferralModal, setEditReferralModal] = useState(null);
   const [statusCounts, setStatusCounts] = useState({});
+  const [creditedFilter, setCreditedFilter] = useState(""); // "", "ADMITTED", "DISCHARGED" — only relevant while viewing the Credited tab
   const navigate = useNavigate();
   const user = JSON.parse(localStorage.getItem("user") || "null");
 
@@ -81,7 +83,8 @@ export default function ReceptionDashboard() {
 
   useEffect(() => { loadDoctors(); }, []);
   useEffect(() => { load(); }, [tab, doctorId, dateFrom, dateTo]);
-  useEffect(() => { setPage(1); }, [tab, doctorId, dateFrom, dateTo, referrals.length]);
+  useEffect(() => { setPage(1); }, [tab, doctorId, dateFrom, dateTo, referrals.length, creditedFilter]);
+  useEffect(() => { if (tab !== "CREDITED") setCreditedFilter(""); }, [tab]);
   // Keep the Card Activity badge fresh even while looking at another tab — reception
   // shouldn't have to click over to Card Activity just to notice new cards came in.
   useEffect(() => {
@@ -180,6 +183,13 @@ export default function ReceptionDashboard() {
     navigate("/login");
   }
 
+  // Admitted/Discharged only makes sense once a referral is CREDITED — dischargedAt is never
+  // set otherwise — so this filter only has visible effect on the Credited tab, same place
+  // the toggle itself is shown.
+  const visibleReferrals = creditedFilter
+    ? referrals.filter((r) => (creditedFilter === "DISCHARGED" ? !!r.dischargedAt : !r.dischargedAt))
+    : referrals;
+
   return (
     <div>
       <div className="topbar">
@@ -225,6 +235,25 @@ export default function ReceptionDashboard() {
             </button>
           </div>
 
+          {tab === "CREDITED" && (
+            <div style={{ display: "flex", gap: 8, marginBottom: 14 }}>
+              {[
+                { key: "", label: "All" },
+                { key: "ADMITTED", label: "Admitted" },
+                { key: "DISCHARGED", label: "Discharged" },
+              ].map((f) => (
+                <button
+                  key={f.key}
+                  className={creditedFilter === f.key ? "" : "secondary"}
+                  style={{ width: "auto", padding: "6px 14px", fontSize: 13 }}
+                  onClick={() => setCreditedFilter(f.key)}
+                >
+                  {f.label}
+                </button>
+              ))}
+            </div>
+          )}
+
           <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginBottom: 4 }}>
             <div style={{ flex: 1, minWidth: 200, maxWidth: 360 }}>
               <label>Doctor</label>
@@ -246,7 +275,7 @@ export default function ReceptionDashboard() {
 
           {message && <p className="success">{message}</p>}
 
-          {referrals.length === 0 && !loading ? (
+          {visibleReferrals.length === 0 && !loading ? (
             <EmptyState icon={ClipboardList} title="No referrals found" subtitle="Try adjusting your filters or search" />
           ) : (
             <div className="table-wrap">
@@ -258,8 +287,8 @@ export default function ReceptionDashboard() {
                 </tr>
               </thead>
               <tbody>
-                {referrals.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE).map((r) => (
-                  <tr key={r.id} style={r.status === "CREDITED" && r.dischargedAt ? { background: "#f4f6fa" } : undefined}>
+                {visibleReferrals.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE).map((r) => (
+                  <tr key={r.id} style={r.status === "CREDITED" && r.dischargedAt ? { background: "#fef3c7" } : undefined}>
                     <td>
                       <div className="cell-primary">{r.patientName}{r.attachmentPath && <AttachmentIcon referralId={r.id} />}</div>
                       <div className="cell-secondary">
@@ -282,7 +311,7 @@ export default function ReceptionDashboard() {
                       <select
                         value={r.panel || ""}
                         onChange={(e) => updatePanel(r.id, e.target.value)}
-                        style={{ minWidth: 120, fontSize: 12.5, padding: "5px 6px" }}
+                        style={{ width: 130, minWidth: 130, maxWidth: 130, fontSize: 12.5, padding: "5px 6px", margin: 0 }}
                       >
                         <option value="">— None —</option>
                         {PANEL_OPTIONS.map((p) => (
@@ -348,13 +377,13 @@ export default function ReceptionDashboard() {
             </div>
           )}
 
-          {referrals.length > PAGE_SIZE && (
+          {visibleReferrals.length > PAGE_SIZE && (
             <div className="pagination">
               <button disabled={page === 1} onClick={() => setPage((p) => p - 1)}><ChevronLeft size={14} /></button>
-              {Array.from({ length: Math.ceil(referrals.length / PAGE_SIZE) }, (_, i) => i + 1).map((p) => (
+              {Array.from({ length: Math.ceil(visibleReferrals.length / PAGE_SIZE) }, (_, i) => i + 1).map((p) => (
                 <button key={p} className={p === page ? "active" : ""} onClick={() => setPage(p)}>{p}</button>
               ))}
-              <button disabled={page === Math.ceil(referrals.length / PAGE_SIZE)} onClick={() => setPage((p) => p + 1)}><ChevronRight size={14} /></button>
+              <button disabled={page === Math.ceil(visibleReferrals.length / PAGE_SIZE)} onClick={() => setPage((p) => p + 1)}><ChevronRight size={14} /></button>
             </div>
           )}
         </div>

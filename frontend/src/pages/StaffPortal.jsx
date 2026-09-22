@@ -357,7 +357,7 @@ export default function StaffPortal() {
                 </thead>
                 <tbody>
                   {referrals.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE).map((r) => (
-                    <tr key={r.id} style={r.status === "CREDITED" && r.dischargedAt ? { background: "#f4f6fa" } : undefined}>
+                    <tr key={r.id} style={r.status === "CREDITED" && r.dischargedAt ? { background: "#fef3c7" } : undefined}>
                       <td>{r.patientName}{r.attachmentPath && <AttachmentIcon referralId={r.id} />}</td>
                       <td>{r.fileNumber || "—"}</td>
                       <td>{r.patientAge}</td>
@@ -377,7 +377,7 @@ export default function StaffPortal() {
                         <select
                           value={r.panel || ""}
                           onChange={(e) => updatePanel(r.id, e.target.value)}
-                          style={{ minWidth: 140, fontSize: 13, padding: "6px 8px" }}
+                          style={{ width: 130, minWidth: 130, maxWidth: 130, fontSize: 13, padding: "6px 8px", margin: 0 }}
                         >
                           <option value="">— None —</option>
                           {PANEL_OPTIONS.map((p) => (
