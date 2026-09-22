@@ -1,14 +1,16 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Search, CheckCircle2, XCircle, MapPin, ChevronLeft, ChevronRight, ArrowUpCircle, UserPlus, LogOut, IdCard } from "lucide-react";
+import { Search, CheckCircle2, XCircle, MapPin, ChevronLeft, ChevronRight, ArrowUpCircle, UserPlus, LogOut, IdCard, Pencil, ClipboardList } from "lucide-react";
 import api from "../api/client";
-import { formatDate, formatDateTime } from "../utils/date";
+import { formatDate } from "../utils/date";
 import DateRangePicker from "../components/DateRangePicker";
 import ConfirmLeadModal from "../components/ConfirmLeadModal";
 import ConvertToIpdModal from "../components/ConvertToIpdModal";
 import AddPatientModal from "../components/AddPatientModal";
+import EditReferralModal from "../components/EditReferralModal";
 import AttachmentIcon from "../components/AttachmentIcon";
 import NotificationBell from "../components/NotificationBell";
+import EmptyState from "../components/EmptyState";
 import { PANEL_OPTIONS } from "../utils/panels";
 
 const PAGE_SIZE = 10;
@@ -34,6 +36,7 @@ export default function ReceptionDashboard() {
   const [confirmModal, setConfirmModal] = useState(null);
   const [convertModal, setConvertModal] = useState(null);
   const [showAddPatient, setShowAddPatient] = useState(false);
+  const [editReferralModal, setEditReferralModal] = useState(null);
   const [statusCounts, setStatusCounts] = useState({});
   const navigate = useNavigate();
   const user = JSON.parse(localStorage.getItem("user") || "null");
@@ -184,10 +187,10 @@ export default function ReceptionDashboard() {
           <img src="/logo.png" alt="Vedansh Medicare" />
           <div><strong>Reception — Referral Matching</strong><span className="brand-sub">{user?.hospitalName}{user?.hospitalBranchName ? ` · ${user.hospitalBranchName}` : ""}</span></div>
         </div>
-        <div>
-          <span style={{ marginRight: 16, color: "#667085" }}>{user?.name}</span>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", justifyContent: "flex-end" }}>
+          <span style={{ color: "#667085" }}>{user?.name}</span>
           <NotificationBell />
-          <button className="secondary" style={{ width: "auto", padding: "6px 14px", marginLeft: 10 }} onClick={logout}>Log out</button>
+          <button className="secondary" style={{ width: "auto", padding: "6px 14px" }} onClick={logout}>Log out</button>
         </div>
       </div>
 
@@ -243,77 +246,107 @@ export default function ReceptionDashboard() {
 
           {message && <p className="success">{message}</p>}
 
-          <div className="table-wrap">
-          <table>
-            <thead>
-              <tr><th>Patient</th><th>File No.</th><th>Age</th><th>Gender</th><th>Phone</th><th>Referred by</th><th>Through</th><th>Status</th><th>Visit</th><th>Credit</th><th>Discharged</th><th>Panel</th><th>Location</th><th>Submitted</th><th></th></tr>
-            </thead>
-            <tbody>
-              {referrals.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE).map((r) => (
-                <tr key={r.id}>
-                  <td>{r.patientName}{r.attachmentPath && <AttachmentIcon referralId={r.id} />}</td>
-                  <td>{r.fileNumber || "—"}</td>
-                  <td>{r.patientAge}</td>
-                  <td>{r.patientGender ? r.patientGender.charAt(0) + r.patientGender.slice(1).toLowerCase() : "—"}</td>
-                  <td>{r.patientPhone || "—"}</td>
-                  <td>{r.doctor?.name}{r.doctor?.clinicName ? ` (${r.doctor.clinicName})` : ""}</td>
-                  <td>{r.doctor?.marketingPerson?.name || "—"}</td>
-                  <td><span className={`badge ${r.status}`}>{r.status}</span></td>
-                  <td>{r.visitType || "—"}{r.convertedAt && r.visitType === "IPD" ? <span style={{ marginLeft: 4, fontSize: 11, color: "var(--ink-soft)" }}>(from OPD)</span> : null}</td>
-                  <td>{r.transaction ? `${Number(r.transaction.amount).toFixed(2)} pts` : "—"}</td>
-                  <td>{r.dischargedAt ? formatDateTime(r.dischargedAt) : "—"}</td>
-                  <td>
-                    <select
-                      value={r.panel || ""}
-                      onChange={(e) => updatePanel(r.id, e.target.value)}
-                      style={{ minWidth: 140, fontSize: 13, padding: "6px 8px" }}
-                    >
-                      <option value="">— None —</option>
-                      {PANEL_OPTIONS.map((p) => (
-                        <option key={p} value={p}>{p}</option>
-                      ))}
-                    </select>
-                  </td>
-                  <td>
-                    {r.scanLatitude != null ? (
-                      <a href={`https://www.google.com/maps?q=${r.scanLatitude},${r.scanLongitude}`} target="_blank" rel="noreferrer">
-                        {r.scanAddress ? r.scanAddress.slice(0, 30) + (r.scanAddress.length > 30 ? "…" : "") : "View on map"}
-                      </a>
-                    ) : (
-                      <span style={{ color: "var(--ink-soft)" }}>Not shared</span>
-                    )}
-                  </td>
-                  <td>{formatDate(r.createdAt)}</td>
-                  <td style={{ whiteSpace: "nowrap" }}>
-                    <div style={{ display: "flex", gap: 6 }}>
-                      {r.status === "CARD_REVIEW" && (
-                        <>
-                          <button style={{ width: "auto", padding: "6px 10px" }} onClick={() => markCardActive(r)}><IdCard size={14} />Mark active</button>
-                          <button className="danger" style={{ width: "auto", padding: "6px 10px" }} onClick={() => markCardInactive(r)}><XCircle size={14} />Mark inactive</button>
-                        </>
-                      )}
-                      {r.status === "PENDING" && (
-                        <>
-                          <button style={{ width: "auto", padding: "6px 10px" }} onClick={() => openConfirmModal(r)}><CheckCircle2 size={14} />Confirm</button>
-                          <button className="danger" style={{ width: "auto", padding: "6px 10px" }} onClick={() => reject(r.id)}><XCircle size={14} />Reject</button>
-                        </>
-                      )}
-                      {r.status === "CREDITED" && r.visitType === "OPD" && (
-                        <button style={{ width: "auto", padding: "6px 10px" }} onClick={() => openConvertModal(r)}><ArrowUpCircle size={14} />Convert to IPD</button>
-                      )}
-                      {r.status === "CREDITED" && !r.dischargedAt && (
-                        <button style={{ width: "auto", padding: "6px 10px" }} onClick={() => discharge(r)}><LogOut size={14} />Discharge</button>
-                      )}
-                    </div>
-                  </td>
+          {referrals.length === 0 && !loading ? (
+            <EmptyState icon={ClipboardList} title="No referrals found" subtitle="Try adjusting your filters or search" />
+          ) : (
+            <div className="table-wrap">
+            <table className="referrals-table">
+              <thead>
+                <tr>
+                  <th>Patient</th><th>Referred by</th><th>Status</th><th>Visit</th><th>Credit</th>
+                  <th>Panel</th><th>ID / Card</th><th>Dates</th><th style={{ width: 32 }}></th><th></th>
                 </tr>
-              ))}
-              {referrals.length === 0 && !loading && (
-                <tr><td colSpan={15} style={{ color: "var(--ink-soft)" }}>No referrals found.</td></tr>
-              )}
-            </tbody>
-          </table>
-          </div>
+              </thead>
+              <tbody>
+                {referrals.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE).map((r) => (
+                  <tr key={r.id} style={r.status === "CREDITED" && r.dischargedAt ? { background: "#f4f6fa" } : undefined}>
+                    <td>
+                      <div className="cell-primary">{r.patientName}{r.attachmentPath && <AttachmentIcon referralId={r.id} />}</div>
+                      <div className="cell-secondary">
+                        {r.patientAge}{r.patientGender ? `${r.patientGender.charAt(0)}` : ""}
+                        {r.fileNumber ? ` · ${r.fileNumber}` : ""}
+                        {r.patientPhone ? ` · ${r.patientPhone}` : ""}
+                      </div>
+                    </td>
+                    <td>
+                      <div className="cell-primary">{r.doctor?.name}{r.doctor?.clinicName ? ` (${r.doctor.clinicName})` : ""}</div>
+                      {r.doctor?.marketingPerson?.name && <div className="cell-secondary">via {r.doctor.marketingPerson.name}</div>}
+                    </td>
+                    <td><span className={`badge ${r.status}`}>{r.status}</span></td>
+                    <td>
+                      {r.visitType || "—"}
+                      {r.convertedAt && r.visitType === "IPD" ? <div className="cell-secondary">from OPD</div> : null}
+                    </td>
+                    <td>{r.transaction ? `${Number(r.transaction.amount).toFixed(0)} pts` : "—"}</td>
+                    <td>
+                      <select
+                        value={r.panel || ""}
+                        onChange={(e) => updatePanel(r.id, e.target.value)}
+                        style={{ minWidth: 120, fontSize: 12.5, padding: "5px 6px" }}
+                      >
+                        <option value="">— None —</option>
+                        {PANEL_OPTIONS.map((p) => (
+                          <option key={p} value={p}>{p}</option>
+                        ))}
+                      </select>
+                    </td>
+                    <td>
+                      {(r.idNumber || r.forceType || r.wardType) ? (
+                        <>
+                          {r.idNumber && <div className="cell-primary">{r.idNumber}</div>}
+                          {(r.forceType || r.wardType) && (
+                            <div className="cell-secondary">{[r.forceType, r.wardType].filter(Boolean).join(" · ")}</div>
+                          )}
+                        </>
+                      ) : "—"}
+                    </td>
+                    <td>
+                      <div className="cell-secondary">In: {formatDate(r.createdAt)}</div>
+                      {r.dischargedAt && <div className="cell-secondary">Out: {formatDate(r.dischargedAt)}</div>}
+                    </td>
+                    <td>
+                      {r.scanLatitude != null ? (
+                        <a
+                          href={`https://www.google.com/maps?q=${r.scanLatitude},${r.scanLongitude}`}
+                          target="_blank" rel="noreferrer"
+                          title={r.scanAddress || "View on map"}
+                          style={{ display: "inline-flex" }}
+                        >
+                          <MapPin size={14} />
+                        </a>
+                      ) : (
+                        <span style={{ color: "var(--border)" }} title="Location not shared"><MapPin size={14} /></span>
+                      )}
+                    </td>
+                    <td className="row-hover-actions" style={{ whiteSpace: "nowrap" }}>
+                      <div style={{ display: "flex", gap: 4, justifyContent: "flex-end" }}>
+                        {r.status === "CARD_REVIEW" && (
+                          <>
+                            <button style={{ width: "auto", padding: 7 }} title="Mark card active" onClick={() => markCardActive(r)}><IdCard size={14} /></button>
+                            <button className="danger" style={{ width: "auto", padding: 7 }} title="Mark card inactive" onClick={() => markCardInactive(r)}><XCircle size={14} /></button>
+                          </>
+                        )}
+                        {r.status === "PENDING" && (
+                          <>
+                            <button style={{ width: "auto", padding: 7 }} title="Confirm" onClick={() => openConfirmModal(r)}><CheckCircle2 size={14} /></button>
+                            <button className="danger" style={{ width: "auto", padding: 7 }} title="Reject" onClick={() => reject(r.id)}><XCircle size={14} /></button>
+                          </>
+                        )}
+                        {r.status === "CREDITED" && r.visitType === "OPD" && (
+                          <button style={{ width: "auto", padding: 7 }} title="Convert to IPD" onClick={() => openConvertModal(r)}><ArrowUpCircle size={14} /></button>
+                        )}
+                        {r.status === "CREDITED" && !r.dischargedAt && (
+                          <button style={{ width: "auto", padding: 7 }} title="Discharge" onClick={() => discharge(r)}><LogOut size={14} /></button>
+                        )}
+                        <button className="secondary" style={{ width: "auto", padding: 7 }} title="Edit" onClick={() => setEditReferralModal(r)}><Pencil size={14} /></button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            </div>
+          )}
 
           {referrals.length > PAGE_SIZE && (
             <div className="pagination">
@@ -334,6 +367,17 @@ export default function ReceptionDashboard() {
           initialIdNumber={confirmModal.idNumber}
           onClose={() => setConfirmModal(null)}
           onConfirm={handleConfirmLead}
+        />
+      )}
+      {editReferralModal && (
+        <EditReferralModal
+          referral={editReferralModal}
+          onClose={() => setEditReferralModal(null)}
+          onSaved={() => {
+            setEditReferralModal(null);
+            setMessage("Referral updated.");
+            load();
+          }}
         />
       )}
       {convertModal && (

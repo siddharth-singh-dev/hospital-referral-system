@@ -1727,7 +1727,7 @@ export default function AdminDashboard() {
                 </thead>
                 <tbody>
                   {referrals.map((r) => (
-                    <tr key={r.id}>
+                    <tr key={r.id} style={r.status === "CREDITED" && r.dischargedAt ? { background: "#f4f6fa" } : undefined}>
                       <td>
                         <div className="cell-primary">{r.patientName}{r.attachmentPath && <AttachmentIcon referralId={r.id} />}</div>
                         <div className="cell-secondary">

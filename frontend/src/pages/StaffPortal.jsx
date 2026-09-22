@@ -243,10 +243,10 @@ export default function StaffPortal() {
             <span className="brand-sub">{user?.hospitalName}{user?.hospitalBranchName ? ` · ${user.hospitalBranchName}` : ""}</span>
           </div>
         </div>
-        <div>
-          <span style={{ marginRight: 16, color: "var(--ink-soft)" }}>{user?.name}</span>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", justifyContent: "flex-end" }}>
+          <span style={{ color: "var(--ink-soft)" }}>{user?.name}</span>
           <NotificationBell />
-          <button className="secondary" style={{ width: "auto", padding: "6px 14px", marginLeft: 10 }} onClick={logout}>Log out</button>
+          <button className="secondary" style={{ width: "auto", padding: "6px 14px" }} onClick={logout}>Log out</button>
         </div>
       </div>
 
@@ -357,7 +357,7 @@ export default function StaffPortal() {
                 </thead>
                 <tbody>
                   {referrals.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE).map((r) => (
-                    <tr key={r.id}>
+                    <tr key={r.id} style={r.status === "CREDITED" && r.dischargedAt ? { background: "#f4f6fa" } : undefined}>
                       <td>{r.patientName}{r.attachmentPath && <AttachmentIcon referralId={r.id} />}</td>
                       <td>{r.fileNumber || "—"}</td>
                       <td>{r.patientAge}</td>

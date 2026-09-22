@@ -83,7 +83,7 @@ export default function NotificationBell() {
   }
 
   return (
-    <div ref={containerRef} style={{ position: "relative" }}>
+    <div ref={containerRef} style={{ position: "relative", display: "inline-flex" }}>
       <button
         className="secondary"
         style={{ width: "auto", padding: "8px 10px", position: "relative" }}
