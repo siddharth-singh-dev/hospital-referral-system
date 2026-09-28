@@ -4,7 +4,7 @@ import axios from "axios";
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid } from "recharts";
 import { Lock, TrendingUp, LogOut, UserPlus, Paperclip, ChevronRight, X } from "lucide-react";
 import Modal from "../components/Modal";
-import CardScanUpload from "../components/CardScanUpload";
+import CardScanUpload, { CARD_TYPES } from "../components/CardScanUpload";
 import { PANEL_OPTIONS } from "../utils/panels";
 
 const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:4000/api";
@@ -16,13 +16,17 @@ const BIRTH_YEARS = Array.from({ length: 111 }, (_, i) => CURRENT_YEAR - i);
 
 // Self-service portal for a hospital marketing-team member. Reached via their personal
 // QR/link (/marketing/:id) + a password only they know. Shows their own stats plus one
-// action: submitting a lead on behalf of one of their own leaders (lands as Pending, same as
-// a leader's own QR submission — unless a card photo is attached, in which case it first sits
-// in reception's "Card Activity" queue until the card is verified). No confirm/credit powers
-// here. No way to see any other marketing person's data, and no way to edit/manage existing
-// referrals at all — that part is still true. Uses its own token storage (keyed by this
-// person's id) rather than the shared staff `api` client, so it never collides with a
-// hospital-staff login open in the same browser.
+// action: submitting a lead on behalf of one of their own leaders. A card/document photo is
+// required on every submission (with an ID number for every type except "Other") — this is
+// what makes hospital-wide duplicate detection possible, so it's no longer optional the way it
+// once was. Only an AYUSHMAN card routes through reception's "Card Activity" queue for
+// verification; everything else lands straight in Pending, same as a leader's own QR
+// submission. No confirm/credit powers here. No way to see any other marketing person's data
+// beyond the deliberately minimal name+card-number "active patients" list (used to self-check
+// for duplicates before submitting), and no way to edit/manage existing referrals at all —
+// that part is still true. Uses its own token storage (keyed by this person's id) rather than
+// the shared staff `api` client, so it never collides with a hospital-staff login open in the
+// same browser.
 export default function MarketingPersonDashboard() {
   const { id } = useParams();
   const tokenKey = `marketing_token_${id}`;
@@ -38,6 +42,9 @@ export default function MarketingPersonDashboard() {
 
   const [showLeadersModal, setShowLeadersModal] = useState(false);
 
+  const [activeDirectory, setActiveDirectory] = useState([]);
+  const [directorySearch, setDirectorySearch] = useState("");
+
   // -------------------- Submit a lead --------------------
   const [showLeadForm, setShowLeadForm] = useState(false);
   const [leaderChoice, setLeaderChoice] = useState(""); // an existing leader's id, or "" / "__new__"
@@ -46,11 +53,14 @@ export default function MarketingPersonDashboard() {
   const [birthYear, setBirthYear] = useState("");
   const [leadGender, setLeadGender] = useState("MALE");
   const [leadPanel, setLeadPanel] = useState("");
+  const [idNumber, setIdNumber] = useState("");
+  const [havePhoto, setHavePhoto] = useState(true); // false = "no photo available" — declare type/ID manually instead
   const [attachmentFile, setAttachmentFile] = useState(null);
   const [attachmentCardType, setAttachmentCardType] = useState("");
   const [submittingLead, setSubmittingLead] = useState(false);
   const [leadError, setLeadError] = useState("");
   const [leadSuccess, setLeadSuccess] = useState("");
+  const [pendingDuplicateWarning, setPendingDuplicateWarning] = useState(""); // set once the backend warns of a possible (non-card) duplicate; submitting again proceeds past it
 
   const computedAge = birthYear ? CURRENT_YEAR - Number(birthYear) : "";
 
@@ -61,8 +71,23 @@ export default function MarketingPersonDashboard() {
     setBirthYear("");
     setLeadGender("MALE");
     setLeadPanel("");
+    setIdNumber("");
+    setHavePhoto(true);
     setAttachmentFile(null);
     setAttachmentCardType("");
+    setPendingDuplicateWarning("");
+  }
+
+  async function loadActiveDirectory(activeToken) {
+    try {
+      const res = await axios.get(`${API_BASE}/referrals/active-directory`, {
+        headers: { Authorization: `Bearer ${activeToken || token}` },
+      });
+      setActiveDirectory(res.data);
+    } catch {
+      // non-critical — the self-check list just stays empty/stale; the backend still enforces
+      // the actual duplicate block regardless
+    }
   }
 
   // Called by CardScanUpload once a photo's been captured/chosen — `ocrResult` is the OCR
@@ -71,6 +96,7 @@ export default function MarketingPersonDashboard() {
   function handleCardScanned(ocrResult, meta) {
     setAttachmentFile(meta.file);
     setAttachmentCardType(meta.cardType);
+    setPendingDuplicateWarning(""); // a changed/re-scanned photo invalidates any earlier warning
     if (ocrResult) {
       if (ocrResult.patientName) setLeadName(ocrResult.patientName);
       // dob can arrive as ISO (1943-11-26), Indian-format (26/11/1943), or "26 Nov 1943" —
@@ -84,6 +110,7 @@ export default function MarketingPersonDashboard() {
       }
       if (ocrResult.patientGender) setLeadGender(ocrResult.patientGender);
       if (ocrResult.panel) setLeadPanel(ocrResult.panel);
+      if (ocrResult.idNumberMasked) setIdNumber(ocrResult.idNumberMasked);
     }
   }
 
@@ -102,6 +129,14 @@ export default function MarketingPersonDashboard() {
       setLeadError("Select the patient's birth year.");
       return;
     }
+    if (!attachmentCardType) {
+      setLeadError("Select what kind of card/document this is.");
+      return;
+    }
+    if (attachmentCardType !== "OTHER" && !idNumber.trim()) {
+      setLeadError("Enter the card/ID number (or re-scan if it wasn't read correctly).");
+      return;
+    }
     setSubmittingLead(true);
     try {
       const formData = new FormData();
@@ -111,10 +146,10 @@ export default function MarketingPersonDashboard() {
       if (leadPanel) formData.append("panel", leadPanel);
       if (leaderChoice === "__new__") formData.append("newLeaderName", newLeaderName.trim());
       else formData.append("leaderId", leaderChoice);
-      if (attachmentFile) {
-        formData.append("attachment", attachmentFile);
-        formData.append("cardType", attachmentCardType);
-      }
+      if (attachmentFile) formData.append("attachment", attachmentFile);
+      formData.append("cardType", attachmentCardType);
+      if (idNumber.trim()) formData.append("idNumber", idNumber.trim());
+      if (pendingDuplicateWarning) formData.append("confirmDuplicate", "true");
 
       const res = await axios.post(`${API_BASE}/referrals/marketing-submit`, formData, {
         headers: { Authorization: `Bearer ${token}` },
@@ -123,8 +158,14 @@ export default function MarketingPersonDashboard() {
       resetLeadForm();
       setShowLeadForm(false);
       loadReport(token); // refresh stats + leaders list, in case a new leader was just created
+      loadActiveDirectory(token);
     } catch (err) {
-      setLeadError(err.response?.data?.error || "Failed to submit this lead.");
+      if (err.response?.status === 409 && err.response?.data?.possibleDuplicate) {
+        // Fuzzy (name + birth year) match, not a hard block — let them decide.
+        setPendingDuplicateWarning(err.response.data.error);
+      } else {
+        setLeadError(err.response?.data?.error || "Failed to submit this lead.");
+      }
     } finally {
       setSubmittingLead(false);
     }
@@ -152,7 +193,10 @@ export default function MarketingPersonDashboard() {
   }
 
   useEffect(() => {
-    if (token) loadReport(token);
+    if (token) {
+      loadReport(token);
+      loadActiveDirectory(token);
+    }
   }, [token]);
 
   async function handleLogin(e) {
@@ -254,6 +298,56 @@ export default function MarketingPersonDashboard() {
         </div>
 
         {leadSuccess && <p style={{ color: "var(--teal-700)", fontSize: 13.5, marginBottom: 20 }}>{leadSuccess}</p>}
+
+        <div className="card" style={{ marginBottom: 20 }}>
+          <h4 style={{ margin: "0 0 10px" }}>Active patients</h4>
+          <input
+            placeholder="Search by name, card number, or panel…"
+            value={directorySearch}
+            onChange={(e) => setDirectorySearch(e.target.value)}
+            style={{ marginBottom: 10 }}
+          />
+          {activeDirectory.length > 0 && (
+            <div style={{ display: "grid", gridTemplateColumns: "1.3fr 1fr 1fr", gap: 8, padding: "0 2px 6px", borderBottom: "1.5px solid #e4e7ee", fontSize: 11, fontWeight: 700, color: "var(--ink-soft)", textTransform: "uppercase" }}>
+              <span>Name</span>
+              <span>Panel</span>
+              <span style={{ textAlign: "right" }}>Card No.</span>
+            </div>
+          )}
+          <div style={{ maxHeight: 240, overflowY: "auto" }}>
+            {activeDirectory.length === 0 ? (
+              <p style={{ color: "var(--ink-soft)", fontSize: 13.5, margin: "8px 2px" }}>No active patients right now.</p>
+            ) : (
+              (() => {
+                const q = directorySearch.trim().toLowerCase();
+                const filtered = q
+                  ? activeDirectory.filter((p) =>
+                      p.patientName.toLowerCase().includes(q) ||
+                      (p.idNumber || "").toLowerCase().includes(q) ||
+                      (p.panel || "").toLowerCase().includes(q)
+                    )
+                  : activeDirectory;
+                return filtered.length === 0 ? (
+                  <p style={{ color: "var(--ink-soft)", fontSize: 13.5, margin: "8px 2px" }}>No matches.</p>
+                ) : (
+                  filtered.map((p, i) => (
+                    <div
+                      key={i}
+                      style={{
+                        display: "grid", gridTemplateColumns: "1.3fr 1fr 1fr", gap: 8, alignItems: "center",
+                        padding: "8px 2px", borderBottom: "1px solid #f0f1f5", fontSize: 13,
+                      }}
+                    >
+                      <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.patientName}</span>
+                      <span style={{ color: "var(--ink-soft)", fontSize: 12, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.panel || "—"}</span>
+                      <span style={{ color: "var(--ink-soft)", textAlign: "right", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.idNumber || "—"}</span>
+                    </div>
+                  ))
+                );
+              })()
+            )}
+          </div>
+        </div>
 
         <div className="card" style={{ marginBottom: 20 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
@@ -375,29 +469,70 @@ export default function MarketingPersonDashboard() {
               {PANEL_OPTIONS.map((p) => <option key={p} value={p}>{p}</option>)}
             </select>
 
-            <label>Card / document photo (optional)</label>
-            <CardScanUpload authToken={token} onExtracted={handleCardScanned} />
-            {attachmentFile && (
-              <p style={{ fontSize: 12.5, color: "var(--ink-soft)", marginTop: -10, marginBottom: 8, display: "flex", alignItems: "center", gap: 6 }}>
-                <Paperclip size={12} />Attached — {attachmentCardType === "OTHER" ? "other document" : `${attachmentCardType} card`}
-                <button
-                  type="button"
-                  className="secondary"
-                  style={{ width: "auto", padding: "2px 6px", marginLeft: "auto" }}
-                  onClick={() => { setAttachmentFile(null); setAttachmentCardType(""); }}
-                >
-                  <X size={12} />
-                </button>
-              </p>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 4 }}>
+              <label style={{ margin: 0 }}>{havePhoto ? "Card / document photo" : "Card / document details"}</label>
+              <button
+                type="button"
+                className="secondary"
+                style={{ width: "auto", padding: "3px 10px", fontSize: 12 }}
+                onClick={() => {
+                  const next = !havePhoto;
+                  setHavePhoto(next);
+                  setAttachmentFile(null);
+                  if (next) setAttachmentCardType(""); // switching back to photo mode: let a scan set it fresh
+                }}
+              >
+                {havePhoto ? "No photo available" : "I have a photo"}
+              </button>
+            </div>
+
+            {havePhoto ? (
+              <>
+                <CardScanUpload authToken={token} onExtracted={handleCardScanned} />
+                {attachmentFile && (
+                  <p style={{ fontSize: 12.5, color: "var(--ink-soft)", marginTop: -10, marginBottom: 8, display: "flex", alignItems: "center", gap: 6 }}>
+                    <Paperclip size={12} />Attached — {attachmentCardType === "OTHER" ? "other document" : `${attachmentCardType} card`}
+                    <button
+                      type="button"
+                      className="secondary"
+                      style={{ width: "auto", padding: "2px 6px", marginLeft: "auto" }}
+                      onClick={() => { setAttachmentFile(null); setAttachmentCardType(""); setIdNumber(""); }}
+                    >
+                      <X size={12} />
+                    </button>
+                  </p>
+                )}
+              </>
+            ) : (
+              <>
+                <label>What kind of card is this?</label>
+                <select value={attachmentCardType} onChange={(e) => { setAttachmentCardType(e.target.value); setPendingDuplicateWarning(""); }} required>
+                  <option value="">— Select —</option>
+                  {CARD_TYPES.map((c) => <option key={c.value} value={c.value}>{c.label}</option>)}
+                </select>
+              </>
             )}
+
+            {attachmentCardType && attachmentCardType !== "OTHER" && (
+              <>
+                <label>Card / ID number</label>
+                <input value={idNumber} onChange={(e) => { setIdNumber(e.target.value); setPendingDuplicateWarning(""); }} placeholder="As printed on the card" required />
+              </>
+            )}
+
             <p style={{ fontSize: 11.5, color: "var(--ink-soft)", marginTop: -2, marginBottom: 8 }}>
-              Only an Ayushman card needs reception to verify it before the lead moves to Pending — every other type (or no photo at all) goes straight to Pending.
+              Only an Ayushman card needs reception to verify it before the lead moves to Pending — every other type goes straight to Pending.
             </p>
 
+            {pendingDuplicateWarning && (
+              <p style={{ fontSize: 13, color: "var(--amber-700, #b45309)", background: "var(--amber-50, #fffbeb)", padding: "8px 10px", borderRadius: 8, marginBottom: 8 }}>
+                {pendingDuplicateWarning} Press "Submit anyway" below to confirm this is genuinely a different person.
+              </p>
+            )}
             {leadError && <p className="error">{leadError}</p>}
 
             <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
-              <button type="submit" disabled={submittingLead}>{submittingLead ? "Submitting…" : "Submit lead"}</button>
+              <button type="submit" disabled={submittingLead}>{submittingLead ? "Submitting…" : pendingDuplicateWarning ? "Submit anyway" : "Submit lead"}</button>
               <button type="button" className="secondary" onClick={() => { resetLeadForm(); setLeadError(""); setShowLeadForm(false); }}>Cancel</button>
             </div>
           </form>

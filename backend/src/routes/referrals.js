@@ -85,7 +85,7 @@ async function reverseGeocode(lat, lon) {
 // Shared filter builder used by the list view and both export endpoints, so exports
 // always match whatever the admin currently has filtered/searched for on screen.
 function buildWhere(req) {
-  const { search, status, doctorId, range, from: fromDate, to: toDate, unpaidOnly, paidOnly } = req.query;
+  const { search, status, doctorId, range, from: fromDate, to: toDate, unpaidOnly, paidOnly, dischargeStatus } = req.query;
   const where = { doctor: { hospitalId: req.user.hospitalId } };
   if (status) where.status = status;
   if (doctorId) where.doctorId = doctorId;
@@ -94,6 +94,9 @@ function buildWhere(req) {
   // has no transaction, so it simply won't match either filter.
   if (unpaidOnly === "true") where.transaction = { redeemed: false };
   if (paidOnly === "true") where.transaction = { redeemed: true };
+  // Same idea for admitted/discharged — only meaningful for CREDITED, harmless elsewhere.
+  if (dischargeStatus === "admitted") where.dischargedAt = null;
+  else if (dischargeStatus === "discharged") where.dischargedAt = { not: null };
   if (search) {
     where.OR = [
       { patientName: { contains: search } },
@@ -1528,10 +1531,11 @@ router.delete("/:id", requireAuth, requireRole("ADMIN"), async (req, res) => {
 });
 
 // POST /api/referrals/marketing-submit  (marketing person's own portal only) — a marketing
-// employee submits a lead directly, on behalf of one of their own leaders. multipart/form-data
-// so a supporting photo (a card, a prescription, whatever proof they have) can come along in
-// the same request, alongside which type of document it is (cardType — one of the OCR card
-// types, or "OTHER" for anything OCR can't read, like a prescription).
+// employee submits a lead directly, on behalf of one of their own leaders. multipart/form-data;
+// a photo is OPTIONAL (sometimes there's nothing to attach — a leader phoned details in with
+// no card in hand), but the card TYPE is always required, and the ID NUMBER is required for
+// every type except OTHER, regardless of whether a photo backs it up. That's the part that
+// actually makes duplicate detection possible below — a photo alone wouldn't.
 //
 // Only an AYUSHMAN card sends the lead to CARD_REVIEW — reception has to check that specific
 // card and mark it active (-> PENDING) or inactive (-> REJECTED) before it enters the normal
@@ -1541,7 +1545,23 @@ router.delete("/:id", requireAuth, requireRole("ADMIN"), async (req, res) => {
 // CGHS/ECHS/CAPF/Aadhaar/Other — carries no such requirement; its photo just attaches as-is
 // and the lead goes straight to PENDING, same as a leader's own QR submission, so reception can
 // still eyeball/cross-check it themselves without it blocking the queue.
+//
+// Duplicate check, run before ANY of that: this hospital's leads currently sitting PENDING,
+// in CARD_REVIEW, or CREDITED-but-not-yet-discharged, are the same patient still "in flight" —
+// admitting them twice would double-credit whoever referred them (possibly two different
+// leaders/marketing employees who never knew about each other). With a usable ID number, this
+// is a hard block, no override — two different marketing employees submitting the same card
+// is exactly the scenario this exists to stop. Without one (an OTHER-type submission has no ID
+// number to check), the best available signal is name + birth year, which is fuzzier — two
+// different real patients can share both — so that path is a warning the employee can
+// consciously override (`confirmDuplicate: "true"`) rather than an unconditional block.
 const CARD_TYPES_FOR_SUBMIT = ["AADHAAR", "AYUSHMAN", "CGHS", "ECHS", "CAPF", "OTHER"];
+const ACTIVE_REFERRAL_STATUS_FILTER = {
+  OR: [
+    { status: { in: ["PENDING", "CARD_REVIEW"] } },
+    { status: "CREDITED", dischargedAt: null },
+  ],
+};
 router.post("/marketing-submit", requireAuth, requireRole("MARKETING"), uploadAttachment.single("attachment"), async (req, res) => {
   const body = req.body || {};
   const patientName = (body.patientName || "").trim();
@@ -1550,6 +1570,8 @@ router.post("/marketing-submit", requireAuth, requireRole("MARKETING"), uploadAt
   const leaderId = (body.leaderId || "").trim();
   const newLeaderName = (body.newLeaderName || "").trim();
   const cardType = (body.cardType || "").trim().toUpperCase();
+  const idNumber = (body.idNumber || "").trim();
+  const confirmDuplicate = body.confirmDuplicate === "true";
 
   if (!patientName) return res.status(400).json({ error: "Patient name is required" });
   if (!Number.isInteger(patientAge) || patientAge <= 0 || patientAge > 130) {
@@ -1561,8 +1583,53 @@ router.post("/marketing-submit", requireAuth, requireRole("MARKETING"), uploadAt
   if (!leaderId && !newLeaderName) {
     return res.status(400).json({ error: "Tell us which leader passed you this lead — pick one from your list or type a new name" });
   }
-  if (req.file && !CARD_TYPES_FOR_SUBMIT.includes(cardType)) {
-    return res.status(400).json({ error: `Select what kind of card/document this photo is (${CARD_TYPES_FOR_SUBMIT.join(", ")})` });
+  // A photo is genuinely optional — sometimes there's nothing to attach (a leader phoned the
+  // details in with no card in hand). What actually has to be captured, one way or another, is
+  // the card TYPE and (for anything but "Other") the ID NUMBER — those are what make duplicate
+  // detection possible, and neither strictly needs a photo behind it.
+  if (!CARD_TYPES_FOR_SUBMIT.includes(cardType)) {
+    return res.status(400).json({ error: `Select what kind of card/document this is (${CARD_TYPES_FOR_SUBMIT.join(", ")})` });
+  }
+  if (cardType !== "OTHER" && !idNumber) {
+    return res.status(400).json({ error: "The card/ID number is required for this card type" });
+  }
+
+  // Hard block: an existing active lead with the same (usable) ID number, anywhere in the
+  // hospital, regardless of who submitted it.
+  let existingActiveMatch = null;
+  if (idNumber) {
+    const normalizedId = normalizeIdNumber(idNumber);
+    if (normalizedId.length >= 6 && !isMaskedAadhaar(idNumber)) {
+      const candidates = await prisma.referral.findMany({
+        where: { doctor: { hospitalId: req.user.hospitalId }, idNumber: { not: null }, ...ACTIVE_REFERRAL_STATUS_FILTER },
+      });
+      existingActiveMatch = candidates.find((c) => normalizeIdNumber(c.idNumber) === normalizedId);
+      if (existingActiveMatch) {
+        return res.status(409).json({
+          error: `This card is already on an active lead for ${existingActiveMatch.patientName} (${existingActiveMatch.status.replace("_", " ").toLowerCase()}). It can't be submitted again until that one is discharged or rejected.`,
+        });
+      }
+    }
+  } else {
+    // No ID number to go on (an OTHER-type submission) — fall back to name + birth year, a
+    // fuzzier signal, so this is a warning rather than a block, and only fires once (the
+    // client resubmits with confirmDuplicate=true to proceed past it).
+    if (!confirmDuplicate) {
+      const normalizedName = patientName.trim().toUpperCase().replace(/\s+/g, " ");
+      const candidates = await prisma.referral.findMany({
+        where: { doctor: { hospitalId: req.user.hospitalId }, ...ACTIVE_REFERRAL_STATUS_FILTER },
+        select: { patientName: true, patientAge: true, status: true },
+      });
+      const possibleMatch = candidates.find(
+        (c) => c.patientName.trim().toUpperCase().replace(/\s+/g, " ") === normalizedName && Math.abs(c.patientAge - patientAge) <= 1
+      );
+      if (possibleMatch) {
+        return res.status(409).json({
+          possibleDuplicate: true,
+          error: `A lead for ${possibleMatch.patientName} (age ~${possibleMatch.patientAge}) already looks active (${possibleMatch.status.replace("_", " ").toLowerCase()}). Submit anyway if this is genuinely a different person?`,
+        });
+      }
+    }
   }
 
   let doctor;
@@ -1577,7 +1644,7 @@ router.post("/marketing-submit", requireAuth, requireRole("MARKETING"), uploadAt
     });
   }
 
-  const isAyushman = req.file && cardType === "AYUSHMAN";
+  const isAyushman = cardType === "AYUSHMAN";
 
   const referral = await prisma.referral.create({
     data: {
@@ -1587,8 +1654,8 @@ router.post("/marketing-submit", requireAuth, requireRole("MARKETING"), uploadAt
       patientGender,
       patientPhone: body.patientPhone?.trim() || null,
       panel: normalizePanel(body.panel),
-      idType: req.file ? cardType : null,
-      idNumber: body.idNumber?.trim() || null,
+      idType: cardType,
+      idNumber: idNumber || null,
       forceType: body.forceType?.trim() || null,
       wardType: body.wardType?.trim() || null,
       attachmentPath: req.file ? path.basename(req.file.path) : null,
@@ -1602,7 +1669,7 @@ router.post("/marketing-submit", requireAuth, requireRole("MARKETING"), uploadAt
     entityType: "Referral",
     entityId: referral.id,
     entityLabel: patientName,
-    metadata: { doctorId: doctor.id, doctorName: doctor.name, newLeaderCreated: !leaderId, cardType: req.file ? cardType : null },
+    metadata: { doctorId: doctor.id, doctorName: doctor.name, newLeaderCreated: !leaderId, cardType },
   });
 
   notify({
@@ -1621,6 +1688,32 @@ router.post("/marketing-submit", requireAuth, requireRole("MARKETING"), uploadAt
     referralId: referral.id,
     doctorName: doctor.name,
   });
+});
+
+// GET /api/referrals/active-directory  (marketing person's own portal only) — a deliberately
+// minimal, hospital-wide list of patients currently "in flight" (Pending, Card Activity, or
+// Credited-but-not-yet-discharged), so a marketing employee can check whether a patient's
+// already been submitted by someone else BEFORE typing in a duplicate lead — a self-serve
+// complement to the hard block in marketing-submit above, not a replacement for it (two people
+// checking this at the exact same instant could still both miss each other).
+//
+// Returns ONLY patientName, idNumber and panel — nothing else. No doctor, no phone, no
+// amounts: everything else on a referral is more than a marketing employee needs to do this
+// one check, and this endpoint is intentionally scoped to not hand out more than that.
+//
+// Ordered by whichever timestamp is actually relevant to each row's current state — arrival
+// time for an admitted (CREDITED, not yet discharged) patient, submission time otherwise —
+// most recent first, since a plain alphabetical list gives no sense of what's fresh.
+router.get("/active-directory", requireAuth, requireRole("MARKETING"), async (req, res) => {
+  const referrals = await prisma.referral.findMany({
+    where: { doctor: { hospitalId: req.user.hospitalId }, ...ACTIVE_REFERRAL_STATUS_FILTER },
+    select: { patientName: true, idNumber: true, panel: true, createdAt: true, arrivedAt: true },
+  });
+  const sorted = referrals
+    .map((r) => ({ ...r, sortAt: r.arrivedAt || r.createdAt }))
+    .sort((a, b) => new Date(b.sortAt) - new Date(a.sortAt))
+    .map(({ patientName, idNumber, panel }) => ({ patientName, idNumber, panel }));
+  res.json(sorted);
 });
 
 // POST /api/referrals/:id/verify-card  (reception + admin) — reception has looked at the

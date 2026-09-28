@@ -4,7 +4,7 @@ import Modal from "./Modal";
 import api from "../api/client";
 import axios from "axios";
 
-const CARD_TYPES = [
+export const CARD_TYPES = [
   { value: "AADHAAR", label: "Aadhaar card" },
   { value: "AYUSHMAN", label: "Ayushman Bharat card" },
   { value: "CGHS", label: "CGHS card" },
