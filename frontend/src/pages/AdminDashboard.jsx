@@ -27,6 +27,7 @@ import MarketingPersonReferralsModal from "../components/MarketingPersonReferral
 import AttachmentIcon from "../components/AttachmentIcon";
 import NotificationBell from "../components/NotificationBell";
 import { PANEL_OPTIONS } from "../utils/panels";
+import { statusLabel } from "../utils/referralStatus";
 import QrModal from "../components/QrModal";
 import MarketingPersonModal from "../components/MarketingPersonModal";
 import MarketingPersonDetailModal from "../components/MarketingPersonDetailModal";
@@ -53,7 +54,7 @@ const PERMISSION_LABELS = {
 const REFERRAL_TABS = [
   { key: "CARD_REVIEW", label: "Card Activity" },
   { key: "PENDING", label: "Pending" },
-  { key: "CREDITED", label: "Credited" },
+  { key: "CREDITED", label: "Admitted" },
   { key: "REJECTED", label: "Rejected" },
   { key: "", label: "All" },
 ];
@@ -894,7 +895,7 @@ export default function AdminDashboard() {
                       <PeriodToggle value={doctorsPeriod} onChange={setDoctorsPeriod} />
                     </div>
                     {(dashboardData.topDoctors?.[doctorsPeriod] || []).length === 0 ? (
-                      <EmptyState icon={Award} title="No credited referrals in this period" />
+                      <EmptyState icon={Award} title="No admitted referrals in this period" />
                     ) : (
                       <div style={{ maxHeight: 280, overflowY: "auto" }}>
                         {dashboardData.topDoctors[doctorsPeriod].map((d, i) => (
@@ -993,7 +994,7 @@ export default function AdminDashboard() {
                       <PeriodToggle value={performancePeriod} onChange={setPerformancePeriod} />
                     </div>
                     <p style={{ fontSize: 12.5, color: "var(--ink-soft)", marginTop: 4, marginBottom: 10 }}>
-                      Of the leads brought in, how many convert to credited patients — and when they do, how big are they typically.
+                      Of the leads brought in, how many convert to admitted patients — and when they do, how big are they typically.
                     </p>
                     <div style={{ display: "flex", gap: 2, background: "var(--teal-50)", borderRadius: 8, padding: 2, width: "fit-content", marginBottom: 12 }}>
                       {[["doctor", "Leaders"], ["marketing", "Marketing employees"]].map(([key, label]) => (
@@ -1023,7 +1024,7 @@ export default function AdminDashboard() {
                               <tr>
                                 <th>{performanceView === "doctor" ? "Leader" : "Marketing employee"}</th>
                                 <th>Leads</th>
-                                <th>Credited</th>
+                                <th>Admitted</th>
                                 <th>Conversion</th>
                                 <th>Avg credit/lead</th>
                                 <th>Rejected</th>
@@ -1740,7 +1741,7 @@ export default function AdminDashboard() {
                         <div className="cell-primary">{r.doctor?.name}{r.doctor?.clinicName ? ` (${r.doctor.clinicName})` : ""}</div>
                         {r.doctor?.marketingPerson?.name && <div className="cell-secondary">via {r.doctor.marketingPerson.name}</div>}
                       </td>
-                      <td><span className={`badge ${r.status}`}>{r.status}</span></td>
+                      <td><span className={`badge ${r.status}`}>{statusLabel(r.status)}</span></td>
                       <td>
                         {r.visitType || "—"}
                         {r.convertedAt && r.visitType === "IPD" ? <div className="cell-secondary">from OPD</div> : null}
@@ -1970,11 +1971,11 @@ export default function AdminDashboard() {
           onClose={() => setShowAddPatient(false)}
           onAdded={(data) => {
             setShowAddPatient(false);
-            const statusLabel = data?.credited ? "Credited" : "Pending";
+            const statusText = data?.credited ? "Admitted" : "Pending";
             setMessage(
               data?.newLeaderCreated
-                ? `Patient added — "${data.doctorName}" was created as a new leader. Now showing under ${statusLabel}.`
-                : `Patient added — now showing under ${statusLabel}.`
+                ? `Patient added — "${data.doctorName}" was created as a new leader. Now showing under ${statusText}.`
+                : `Patient added — now showing under ${statusText}.`
             );
             setReferralTab(data?.credited ? "CREDITED" : "PENDING");
             loadReferrals();

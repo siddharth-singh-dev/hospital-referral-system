@@ -1644,7 +1644,13 @@ router.post("/marketing-submit", requireAuth, requireRole("MARKETING"), uploadAt
     });
   }
 
-  const isAyushman = cardType === "AYUSHMAN";
+  // Which card types actually need reception to manually verify validity before a lead can
+  // enter the normal queue. Ayushman cards commonly lapse/go inactive; CAPF and private-TPA
+  // ("Other") cards have the same real-world problem — coverage status varies and isn't
+  // something OCR or this system can check on its own. CGHS/ECHS/Aadhaar don't carry that same
+  // day-to-day validity risk, so they go straight to Pending same as before.
+  const CARD_TYPES_NEEDING_VERIFICATION = ["AYUSHMAN", "CAPF", "OTHER"];
+  const needsCardCheck = CARD_TYPES_NEEDING_VERIFICATION.includes(cardType);
 
   const referral = await prisma.referral.create({
     data: {
@@ -1659,7 +1665,7 @@ router.post("/marketing-submit", requireAuth, requireRole("MARKETING"), uploadAt
       forceType: body.forceType?.trim() || null,
       wardType: body.wardType?.trim() || null,
       attachmentPath: req.file ? path.basename(req.file.path) : null,
-      status: isAyushman ? "CARD_REVIEW" : "PENDING",
+      status: needsCardCheck ? "CARD_REVIEW" : "PENDING",
     },
   });
 
@@ -1674,16 +1680,16 @@ router.post("/marketing-submit", requireAuth, requireRole("MARKETING"), uploadAt
 
   notify({
     hospitalId: req.user.hospitalId,
-    type: isAyushman ? NOTIFICATION_TYPES.CARD_REVIEW_NEW : NOTIFICATION_TYPES.PENDING_NEW,
-    message: isAyushman
+    type: needsCardCheck ? NOTIFICATION_TYPES.CARD_REVIEW_NEW : NOTIFICATION_TYPES.PENDING_NEW,
+    message: needsCardCheck
       ? `New card to verify — ${patientName} (via ${doctor.name})`
       : `New pending lead — ${patientName} (via ${doctor.name})`,
     referralId: referral.id,
   });
 
   res.status(201).json({
-    message: isAyushman
-      ? "Lead submitted — reception will verify the Ayushman card before it moves to Pending."
+    message: needsCardCheck
+      ? "Lead submitted — reception will verify this card before it moves to Pending."
       : "Lead submitted — it'll show up as Pending until reception confirms it.",
     referralId: referral.id,
     doctorName: doctor.name,

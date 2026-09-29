@@ -6,8 +6,9 @@ import api from "../api/client";
 import { formatDateTime } from "../utils/date";
 
 const STATUS_LABELS = {
+  CARD_REVIEW: "Card being verified",
   PENDING: "Awaiting patient arrival",
-  CREDITED: "Confirmed & credited",
+  CREDITED: "Confirmed & admitted",
   REJECTED: "Not matched / rejected",
 };
 const HISTORY_PAGE_SIZE = 8;

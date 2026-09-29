@@ -521,7 +521,7 @@ export default function MarketingPersonDashboard() {
             )}
 
             <p style={{ fontSize: 11.5, color: "var(--ink-soft)", marginTop: -2, marginBottom: 8 }}>
-              Only an Ayushman card needs reception to verify it before the lead moves to Pending — every other type goes straight to Pending.
+              Ayushman, CAPF, and Other (private TPA) cards need reception to verify them before the lead moves to Pending — Aadhaar, CGHS, and ECHS go straight to Pending.
             </p>
 
             {pendingDuplicateWarning && (

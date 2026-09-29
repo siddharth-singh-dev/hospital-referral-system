@@ -1,22 +1,24 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { ChevronLeft, ChevronRight, ArrowUpCircle, LogOut } from "lucide-react";
+import { ChevronLeft, ChevronRight, ArrowUpCircle, LogOut, Pencil } from "lucide-react";
 import api from "../api/client";
 import { formatDate, formatDateTime } from "../utils/date";
 import RedeemModal from "../components/RedeemModal";
 import ConfirmLeadModal from "../components/ConfirmLeadModal";
 import ConvertToIpdModal from "../components/ConvertToIpdModal";
+import EditReferralModal from "../components/EditReferralModal";
 import DateRangePicker from "../components/DateRangePicker";
 import AttachmentIcon from "../components/AttachmentIcon";
 import NotificationBell from "../components/NotificationBell";
 import { PANEL_OPTIONS } from "../utils/panels";
+import { statusLabel } from "../utils/referralStatus";
 
 const PAGE_SIZE = 10;
 
 const REFERRAL_TABS = [
   { key: "CARD_REVIEW", label: "Card Activity" },
   { key: "PENDING", label: "Pending" },
-  { key: "CREDITED", label: "Credited" },
+  { key: "CREDITED", label: "Admitted" },
   { key: "REJECTED", label: "Rejected" },
   { key: "", label: "All" },
 ];
@@ -44,6 +46,7 @@ export default function StaffPortal() {
   const [redeemModal, setRedeemModal] = useState(null);
   const [confirmModal, setConfirmModal] = useState(null);
   const [convertModal, setConvertModal] = useState(null);
+  const [editReferralModal, setEditReferralModal] = useState(null);
   const [page, setPage] = useState(1);
   const [statusCounts, setStatusCounts] = useState({});
   const canViewCounts = permissions.includes("VIEW_REFERRALS") || permissions.includes("MANAGE_REFERRALS");
@@ -364,7 +367,7 @@ export default function StaffPortal() {
                       <td>{r.patientGender ? r.patientGender.charAt(0) + r.patientGender.slice(1).toLowerCase() : "—"}</td>
                       <td>{r.doctor?.name}{r.doctor?.clinicName ? ` (${r.doctor.clinicName})` : ""}</td>
                       <td>{r.doctor?.marketingPerson?.name || "—"}</td>
-                      <td><span className={`badge ${r.status}`}>{r.status}</span></td>
+                      <td><span className={`badge ${r.status}`}>{statusLabel(r.status)}</span></td>
                       <td>{r.visitType || "—"}{r.convertedAt && r.visitType === "IPD" ? <span style={{ marginLeft: 4, fontSize: 11, color: "var(--ink-soft)" }}>(from OPD)</span> : null}</td>
                       <td>{r.transaction ? `${Number(r.transaction.amount).toFixed(2)} pts` : "—"}</td>
                       <td>
@@ -416,6 +419,9 @@ export default function StaffPortal() {
                             )}
                             {canRedeem && r.transaction && !r.transaction.redeemed && (
                               <button className="btn-redeem" style={{ width: "auto", padding: "6px 14px" }} onClick={() => setRedeemModal({ mode: "single", referral: r, defaultAmount: Number(r.transaction.amount) })}>Redeem</button>
+                            )}
+                            {canManage && (
+                              <button className="secondary" style={{ width: "auto", padding: "6px 10px" }} title="Edit" onClick={() => setEditReferralModal(r)}><Pencil size={14} /></button>
                             )}
                           </div>
                         </td>
@@ -477,6 +483,17 @@ export default function StaffPortal() {
           currentAmount={convertModal.transaction ? Number(convertModal.transaction.amount) : 0}
           onClose={() => setConvertModal(null)}
           onConvert={handleConvertToIpd}
+        />
+      )}
+      {editReferralModal && (
+        <EditReferralModal
+          referral={editReferralModal}
+          onClose={() => setEditReferralModal(null)}
+          onSaved={() => {
+            setEditReferralModal(null);
+            setMessage("Referral updated.");
+            load();
+          }}
         />
       )}
     </div>

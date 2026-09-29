@@ -12,12 +12,13 @@ import AttachmentIcon from "../components/AttachmentIcon";
 import NotificationBell from "../components/NotificationBell";
 import EmptyState from "../components/EmptyState";
 import { PANEL_OPTIONS } from "../utils/panels";
+import { statusLabel } from "../utils/referralStatus";
 
 const PAGE_SIZE = 10;
 const TABS = [
   { key: "CARD_REVIEW", label: "Card Activity" },
   { key: "PENDING", label: "Pending" },
-  { key: "CREDITED", label: "Credited" },
+  { key: "CREDITED", label: "Admitted" },
   { key: "REJECTED", label: "Rejected" },
   { key: "", label: "All" },
 ];
@@ -301,7 +302,7 @@ export default function ReceptionDashboard() {
                       <div className="cell-primary">{r.doctor?.name}{r.doctor?.clinicName ? ` (${r.doctor.clinicName})` : ""}</div>
                       {r.doctor?.marketingPerson?.name && <div className="cell-secondary">via {r.doctor.marketingPerson.name}</div>}
                     </td>
-                    <td><span className={`badge ${r.status}`}>{r.status}</span></td>
+                    <td><span className={`badge ${r.status}`}>{statusLabel(r.status)}</span></td>
                     <td>
                       {r.visitType || "—"}
                       {r.convertedAt && r.visitType === "IPD" ? <div className="cell-secondary">from OPD</div> : null}
@@ -423,11 +424,11 @@ export default function ReceptionDashboard() {
           onClose={() => setShowAddPatient(false)}
           onAdded={(data) => {
             setShowAddPatient(false);
-            const statusLabel = data?.credited ? "Credited" : "Pending";
+            const statusText = data?.credited ? "Admitted" : "Pending";
             setMessage(
               data?.newLeaderCreated
-                ? `Patient added — "${data.doctorName}" was created as a new leader. Now showing under ${statusLabel}.`
-                : `Patient added — now showing under ${statusLabel}.`
+                ? `Patient added — "${data.doctorName}" was created as a new leader. Now showing under ${statusText}.`
+                : `Patient added — now showing under ${statusText}.`
             );
             setTab(data?.credited ? "CREDITED" : "PENDING");
             load();
