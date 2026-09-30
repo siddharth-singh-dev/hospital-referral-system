@@ -232,7 +232,6 @@ export default function CardScanUpload({ doctorCode, authToken, onExtracted }) {
         ref={fileInputRef}
         type="file"
         accept="image/*"
-        capture="environment"
         style={{ display: "none" }}
         onChange={handleFile}
       />
