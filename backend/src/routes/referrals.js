@@ -54,7 +54,7 @@ const publicLimiter = rateLimit({
 const referralSchema = z.object({
   doctorCode: z.string().uuid(),
   patientName: z.string().min(1),
-  patientAge: z.number().int().positive().max(130),
+  patientAge: z.number().int().nonnegative().max(130), // 0 is valid — a newborn is genuinely 0 years old
   patientPhone: z.string().optional(),
   patientGender: z.enum(["MALE", "FEMALE", "OTHER"]),
   panel: z.string().optional(),
@@ -183,7 +183,7 @@ const manualReferralSchema = z.object({
   doctorId: z.string().uuid().optional(),
   newLeaderName: z.string().min(1).optional(),
   patientName: z.string().min(1),
-  patientAge: z.number().int().positive().max(130),
+  patientAge: z.number().int().nonnegative().max(130), // 0 is valid — a newborn is genuinely 0 years old
   patientPhone: z.string().optional(),
   patientGender: z.enum(["MALE", "FEMALE", "OTHER"]),
   panel: z.string().optional(),
@@ -817,7 +817,7 @@ router.patch("/:id/panel", requireAuth, requireAccess(["ADMIN", "RECEPTION"], ["
 // entered directly (see /referrals/manual).
 const referralEditSchema = z.object({
   patientName: z.string().min(1).optional(),
-  patientAge: z.number().int().positive().max(130).optional(),
+  patientAge: z.number().int().nonnegative().max(130).optional(), // 0 is valid — a newborn is genuinely 0 years old
   patientGender: z.enum(["MALE", "FEMALE", "OTHER"]).optional(),
   patientPhone: z.string().nullable().optional(),
   fileNumber: z.string().nullable().optional(),
@@ -1574,8 +1574,8 @@ router.post("/marketing-submit", requireAuth, requireRole("MARKETING"), uploadAt
   const confirmDuplicate = body.confirmDuplicate === "true";
 
   if (!patientName) return res.status(400).json({ error: "Patient name is required" });
-  if (!Number.isInteger(patientAge) || patientAge <= 0 || patientAge > 130) {
-    return res.status(400).json({ error: "A valid patient age is required" });
+  if (!Number.isInteger(patientAge) || patientAge < 0 || patientAge > 130) {
+    return res.status(400).json({ error: "A valid patient age is required" }); // 0 is valid — a newborn is genuinely 0 years old
   }
   if (!["MALE", "FEMALE", "OTHER"].includes(patientGender)) {
     return res.status(400).json({ error: "Patient gender is required" });
