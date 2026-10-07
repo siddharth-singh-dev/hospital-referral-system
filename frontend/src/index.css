@@ -101,6 +101,13 @@ input:focus, select:focus {
 }
 
 label { font-weight: 600; font-size: 13px; color: var(--ink-soft); }
+.note-input {
+  width: 100%; padding: 11px 14px; margin: 6px 0 4px; border: 1.5px solid var(--border);
+  border-radius: 10px; font-size: 15px; font-family: inherit; color: var(--ink);
+  background: #fff; resize: vertical; box-sizing: border-box;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+.note-input:focus { outline: none; border-color: var(--teal-500); box-shadow: 0 0 0 3px var(--teal-100); }
 
 .combobox-wrap { position: relative; }
 .combobox-list {

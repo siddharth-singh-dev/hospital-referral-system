@@ -25,6 +25,7 @@ import AddPatientModal from "../components/AddPatientModal";
 import EditReferralModal from "../components/EditReferralModal";
 import MarketingPersonReferralsModal from "../components/MarketingPersonReferralsModal";
 import AttachmentIcon from "../components/AttachmentIcon";
+import LeadNote from "../components/LeadNote";
 import NotificationBell from "../components/NotificationBell";
 import { PANEL_OPTIONS } from "../utils/panels";
 import { statusLabel } from "../utils/referralStatus";
@@ -1736,6 +1737,7 @@ export default function AdminDashboard() {
                           {r.fileNumber ? ` · ${r.fileNumber}` : ""}
                           {r.patientPhone ? ` · ${r.patientPhone}` : ""}
                         </div>
+                        {r.leadNote && <LeadNote text={r.leadNote} />}
                       </td>
                       <td>
                         <div className="cell-primary">{r.doctor?.name}{r.doctor?.clinicName ? ` (${r.doctor.clinicName})` : ""}</div>

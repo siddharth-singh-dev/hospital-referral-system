@@ -258,6 +258,11 @@ model Referral {
   // ID documents. Null for every other referral-creation path.
   attachmentPath  String?
 
+  // A short free-text note the marketing person sends along with the lead (e.g. "cash patient,
+  // prescription attached, wants a private room") so reception sees it in Card Activity /
+  // Pending without having to phone anyone. Max 300 chars; null when none was given.
+  leadNote        String?        @db.VarChar(300)
+
   createdAt       DateTime       @default(now())
 
   transaction     CreditTransaction?

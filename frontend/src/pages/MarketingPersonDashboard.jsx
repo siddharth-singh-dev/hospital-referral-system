@@ -79,6 +79,7 @@ export default function MarketingPersonDashboard() {
   const [birthYear, setBirthYear] = useState("");
   const [leadGender, setLeadGender] = useState("MALE");
   const [leadPanel, setLeadPanel] = useState("");
+  const [leadNote, setLeadNote] = useState(""); // optional message for reception, shown on the lead
   const [idNumber, setIdNumber] = useState("");
   const [havePhoto, setHavePhoto] = useState(true); // false = "no photo available" — declare type/ID manually instead
   const [attachmentFile, setAttachmentFile] = useState(null);
@@ -97,6 +98,7 @@ export default function MarketingPersonDashboard() {
     setBirthYear("");
     setLeadGender("MALE");
     setLeadPanel("");
+    setLeadNote("");
     setIdNumber("");
     setHavePhoto(true);
     setAttachmentFile(null);
@@ -169,6 +171,10 @@ export default function MarketingPersonDashboard() {
       setLeadError("Select the patient's birth year.");
       return;
     }
+    if (!leadPanel) {
+      setLeadError("Select the patient's panel.");
+      return;
+    }
     if (!attachmentCardType) {
       setLeadError("Select what kind of card/document this is.");
       return;
@@ -183,7 +189,8 @@ export default function MarketingPersonDashboard() {
       formData.append("patientName", leadName.trim());
       formData.append("patientAge", computedAge);
       formData.append("patientGender", leadGender);
-      if (leadPanel) formData.append("panel", leadPanel);
+      formData.append("panel", leadPanel);
+      if (leadNote.trim()) formData.append("leadNote", leadNote.trim());
       if (leaderChoice === "__new__") formData.append("newLeaderName", newLeaderName.trim());
       else formData.append("leaderId", leaderChoice);
       if (attachmentFile) formData.append("attachment", attachmentFile);
@@ -581,9 +588,9 @@ export default function MarketingPersonDashboard() {
               ))}
             </div>
 
-            <label>Panel (optional)</label>
-            <select value={leadPanel} onChange={(e) => setLeadPanel(e.target.value)}>
-              <option value="">— None —</option>
+            <label>Panel</label>
+            <select value={leadPanel} onChange={(e) => setLeadPanel(e.target.value)} required>
+              <option value="">Select panel…</option>
               {PANEL_OPTIONS.map((p) => <option key={p} value={p}>{p}</option>)}
             </select>
 
@@ -641,6 +648,17 @@ export default function MarketingPersonDashboard() {
             <p style={{ fontSize: 11.5, color: "var(--ink-soft)", marginTop: -2, marginBottom: 8 }}>
               Ayushman cards need reception to verify them before the lead moves to Pending — every other lead goes straight to Pending.
             </p>
+
+            <label>Note for reception (optional)</label>
+            <textarea
+              className="note-input"
+              rows={3}
+              maxLength={300}
+              value={leadNote}
+              onChange={(e) => setLeadNote(e.target.value)}
+              placeholder="e.g. Cash patient, prescription attached — needs admission today"
+            />
+            <div style={{ fontSize: 11.5, color: "var(--ink-soft)", textAlign: "right", marginBottom: 10 }}>{leadNote.length}/300</div>
 
             {pendingDuplicateWarning && (
               <p style={{ fontSize: 13, color: "var(--amber-700, #b45309)", background: "var(--amber-50, #fffbeb)", padding: "8px 10px", borderRadius: 8, marginBottom: 8 }}>

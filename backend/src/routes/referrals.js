@@ -1580,6 +1580,19 @@ router.post("/marketing-submit", requireAuth, requireRole("MARKETING"), uploadAt
   if (!["MALE", "FEMALE", "OTHER"].includes(patientGender)) {
     return res.status(400).json({ error: "Patient gender is required" });
   }
+  // The panel (insurer / scheme / "Cash") is mandatory so reception knows how the patient will
+  // be billed. The upload is already on disk by the time we get here, so drop it on rejection
+  // rather than leaving an orphaned ID photo behind.
+  const panel = normalizePanel(body.panel);
+  if (!panel) {
+    if (req.file) fs.unlink(req.file.path, () => {});
+    return res.status(400).json({ error: "Select the patient's panel" });
+  }
+  const leadNote = (body.leadNote || "").trim();
+  if (leadNote.length > 300) {
+    if (req.file) fs.unlink(req.file.path, () => {});
+    return res.status(400).json({ error: "Keep the note to 300 characters or fewer" });
+  }
   if (!leaderId && !newLeaderName) {
     return res.status(400).json({ error: "Tell us which leader passed you this lead — pick one from your list or type a new name" });
   }
@@ -1659,7 +1672,8 @@ router.post("/marketing-submit", requireAuth, requireRole("MARKETING"), uploadAt
       patientAge,
       patientGender,
       patientPhone: body.patientPhone?.trim() || null,
-      panel: normalizePanel(body.panel),
+      panel,
+      leadNote: leadNote || null,
       idType: cardType,
       idNumber: idNumber || null,
       forceType: body.forceType?.trim() || null,
