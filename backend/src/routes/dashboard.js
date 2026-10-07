@@ -61,7 +61,7 @@ router.get("/summary", requireAuth, requireRole("ADMIN"), async (req, res) => {
     prisma.referral.findMany({
       where: { doctor: { hospitalId } },
       select: {
-        id: true, patientName: true, patientAge: true, patientGender: true, status: true, createdAt: true, rejectedReason: true,
+        id: true, patientName: true, patientAge: true, patientGender: true, status: true, createdAt: true, rejectedReason: true, attachmentPath: true,
         doctor: { select: { id: true, name: true, clinicName: true, marketingPersonId: true } },
       },
       orderBy: { createdAt: "desc" },
@@ -263,6 +263,7 @@ router.get("/summary", requireAuth, requireRole("ADMIN"), async (req, res) => {
         leaderName: r.doctor.name,
         marketingPersonName: mpId && marketingPersonMap.has(mpId) ? marketingPersonMap.get(mpId).name : null,
         createdAt: r.createdAt,
+        hasAttachment: !!r.attachmentPath,
       });
     }
     return Array.from(buckets.values())
@@ -326,6 +327,7 @@ router.get("/marketing-comparison/:marketingPersonId/referrals", requireAuth, re
       patientName: true,
       createdAt: true,
       status: true,
+      attachmentPath: true,
       transaction: { select: { amount: true, redeemed: true } },
     },
     orderBy: { createdAt: "desc" },
@@ -341,6 +343,7 @@ router.get("/marketing-comparison/:marketingPersonId/referrals", requireAuth, re
       patientName: r.patientName,
       doa: r.createdAt,
       status: r.status,
+      hasAttachment: !!r.attachmentPath,
       // A referral only has a transaction once it's been credited. Split into "paid" vs
       // "pending" here (rather than sending amount + redeemed and letting the frontend
       // figure it out) since that's exactly the two columns the drill-down table needs.

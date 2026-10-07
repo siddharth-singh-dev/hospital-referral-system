@@ -269,9 +269,10 @@ router.get("/public/me", requireAuth, requireRole("MARKETING"), async (req, res)
   res.json(await buildPersonDetail(person));
 });
 
-// Card types that reception has to verify (CARD_REVIEW) before a lead can move on. For these,
-// a lead that's now PENDING (or further) got there because reception marked the card active.
-const CARD_TYPES_NEEDING_CHECK = ["AYUSHMAN", "CAPF", "OTHER"];
+// Only Ayushman cards are verified by reception (CARD_REVIEW) before a lead can move on. For
+// these, a lead that's now PENDING (or further) got there because reception marked the card
+// active. Every other type goes straight to PENDING at submission and is never "card checked".
+const CARD_TYPES_NEEDING_CHECK = ["AYUSHMAN"];
 const DEFAULT_CARD_INACTIVE_REASON = "Card not active"; // what POST /referrals/:id/verify-card writes
 
 // Collapses a referral's raw status + timestamps into the one stage a marketing person cares

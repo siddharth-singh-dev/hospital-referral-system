@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import Modal from "./Modal";
 import EmptyState from "./EmptyState";
+import AttachmentIcon from "./AttachmentIcon";
 import api from "../api/client";
 import { formatDate } from "../utils/date";
 import { ClipboardList } from "lucide-react";
@@ -58,7 +59,7 @@ export default function MarketingPersonReferralsModal({ marketingPersonId, marke
               {referrals.map((r) => (
                 <tr key={r.id}>
                   <td>{r.fileNumber || "—"}</td>
-                  <td>{r.patientName}</td>
+                  <td>{r.patientName}{r.hasAttachment && <AttachmentIcon referralId={r.id} />}</td>
                   <td>{formatDate(r.doa)}</td>
                   <td style={{ color: "var(--teal-700)", fontWeight: r.paidAmount != null ? 600 : 400 }}>
                     {r.paidAmount != null ? `${r.paidAmount.toFixed(2)} pts` : "—"}

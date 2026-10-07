@@ -1644,12 +1644,12 @@ router.post("/marketing-submit", requireAuth, requireRole("MARKETING"), uploadAt
     });
   }
 
-  // Which card types actually need reception to manually verify validity before a lead can
-  // enter the normal queue. Ayushman cards commonly lapse/go inactive; CAPF and private-TPA
-  // ("Other") cards have the same real-world problem — coverage status varies and isn't
-  // something OCR or this system can check on its own. CGHS/ECHS/Aadhaar don't carry that same
-  // day-to-day validity risk, so they go straight to Pending same as before.
-  const CARD_TYPES_NEEDING_VERIFICATION = ["AYUSHMAN", "CAPF", "OTHER"];
+  // Only an Ayushman card needs reception to manually verify it's still active before the lead
+  // can enter the normal queue (scheme status commonly lapses and isn't something OCR or this
+  // system can check on its own). Every other type — CGHS/ECHS/CAPF/Aadhaar/Other, including
+  // cash patients sent with just a prescription — goes straight to Pending, with any attached
+  // photo carried along on the referral for reception to look at.
+  const CARD_TYPES_NEEDING_VERIFICATION = ["AYUSHMAN"];
   const needsCardCheck = CARD_TYPES_NEEDING_VERIFICATION.includes(cardType);
 
   const referral = await prisma.referral.create({

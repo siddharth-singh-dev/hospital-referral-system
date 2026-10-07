@@ -1085,7 +1085,7 @@ export default function AdminDashboard() {
                                 <div style={{ paddingLeft: 8, paddingBottom: 8 }}>
                                   {r.referrals.map((ref) => (
                                     <div key={ref.id} style={{ padding: "5px 4px", fontSize: 12.5, borderTop: "1px dashed var(--border)" }}>
-                                      <div style={{ color: "var(--ink)" }}>{ref.patientName}</div>
+                                      <div style={{ color: "var(--ink)" }}>{ref.patientName}{ref.hasAttachment && <AttachmentIcon referralId={ref.id} />}</div>
                                       <div style={{ color: "var(--ink-soft)" }}>
                                         via {ref.leaderName}{ref.marketingPersonName ? ` · ${ref.marketingPersonName}` : ""} · {formatDate(ref.createdAt)}
                                       </div>
