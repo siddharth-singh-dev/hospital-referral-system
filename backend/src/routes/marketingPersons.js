@@ -269,4 +269,75 @@ router.get("/public/me", requireAuth, requireRole("MARKETING"), async (req, res)
   res.json(await buildPersonDetail(person));
 });
 
+// Card types that reception has to verify (CARD_REVIEW) before a lead can move on. For these,
+// a lead that's now PENDING (or further) got there because reception marked the card active.
+const CARD_TYPES_NEEDING_CHECK = ["AYUSHMAN", "CAPF", "OTHER"];
+const DEFAULT_CARD_INACTIVE_REASON = "Card not active"; // what POST /referrals/:id/verify-card writes
+
+// Collapses a referral's raw status + timestamps into the one stage a marketing person cares
+// about. Kept server-side so the portal doesn't need to know how reception's actions map
+// onto statuses.
+function leadStage(r) {
+  switch (r.status) {
+    case "CARD_REVIEW":
+      return { stage: "CARD_REVIEW", label: "Card under review", note: "Waiting for reception" };
+    case "PENDING":
+      return CARD_TYPES_NEEDING_CHECK.includes(r.idType)
+        ? { stage: "CARD_ACTIVE", label: "Card active", note: "Awaiting arrival" }
+        : { stage: "PENDING", label: "Awaiting arrival", note: null };
+    case "CREDITED":
+      if (r.dischargedAt) return { stage: "DISCHARGED", label: "Discharged", note: r.visitType || null };
+      return r.visitType === "OPD"
+        ? { stage: "OPD", label: "OPD visit", note: null }
+        : { stage: "ADMITTED", label: "Admitted", note: r.visitType || null };
+    case "REJECTED": {
+      const reason = r.rejectedReason && r.rejectedReason !== "No reason given" ? r.rejectedReason : null;
+      return r.rejectedReason === DEFAULT_CARD_INACTIVE_REASON
+        ? { stage: "CARD_INACTIVE", label: "Card inactive", note: null }
+        : { stage: "REJECTED", label: "Rejected", note: reason };
+    }
+    default:
+      return { stage: r.status, label: r.status, note: null };
+  }
+}
+
+// GET /api/marketing-persons/public/me/leads — the logged-in marketing person's own leads
+// (every referral under the leaders associated with them) and where each one stands. Scoped
+// strictly by the token's marketingPersonId. Returns only what the table needs — no phone,
+// no ID number, no location.
+router.get("/public/me/leads", requireAuth, requireRole("MARKETING"), async (req, res) => {
+  const person = await prisma.marketingPerson.findUnique({ where: { id: req.user.marketingPersonId } });
+  if (!person || !person.active) return res.status(403).json({ error: "This account is not active" });
+
+  const referrals = await prisma.referral.findMany({
+    where: { doctor: { marketingPersonId: req.user.marketingPersonId } },
+    orderBy: { createdAt: "desc" },
+    take: 300,
+    select: {
+      id: true,
+      patientName: true,
+      idType: true,
+      panel: true,
+      status: true,
+      rejectedReason: true,
+      visitType: true,
+      dischargedAt: true,
+      createdAt: true,
+      doctor: { select: { name: true } },
+    },
+  });
+
+  res.json(
+    referrals.map((r) => ({
+      id: r.id,
+      patientName: r.patientName,
+      leaderName: r.doctor.name,
+      cardType: r.idType,
+      panel: r.panel,
+      submittedAt: r.createdAt,
+      ...leadStage(r),
+    }))
+  );
+});
+
 export default router;

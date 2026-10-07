@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
 import axios from "axios";
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid } from "recharts";
-import { Lock, TrendingUp, LogOut, UserPlus, Paperclip, ChevronRight, X } from "lucide-react";
+import { Lock, TrendingUp, LogOut, UserPlus, Paperclip, ChevronRight, X, RefreshCw } from "lucide-react";
 import Modal from "../components/Modal";
 import CardScanUpload, { CARD_TYPES } from "../components/CardScanUpload";
 import { PANEL_OPTIONS } from "../utils/panels";
@@ -13,6 +13,26 @@ const CURRENT_YEAR = new Date().getFullYear();
 // Newborn (this year) down to 110 years old — covers realistic patient ages without asking
 // for a full date of birth, which the hospital doesn't otherwise collect for a quick lead.
 const BIRTH_YEARS = Array.from({ length: 111 }, (_, i) => CURRENT_YEAR - i);
+
+// How each lead "stage" (computed by GET /marketing-persons/public/me/leads) is drawn, and
+// which filter chip it belongs to.
+const STAGE_META = {
+  CARD_REVIEW:   { bg: "var(--blue-50, #eff6ff)", color: "var(--blue-700, #1d4ed8)", group: "REVIEW" },
+  CARD_ACTIVE:   { bg: "var(--green-100)", color: "var(--green-700)", group: "WAITING" },
+  PENDING:       { bg: "var(--amber-50)", color: "var(--amber-700)", group: "WAITING" },
+  ADMITTED:      { bg: "var(--green-100)", color: "var(--green-700)", group: "ADMITTED" },
+  OPD:           { bg: "var(--green-100)", color: "var(--green-700)", group: "ADMITTED" },
+  DISCHARGED:    { bg: "#eef0f4", color: "var(--ink-soft)", group: "ADMITTED" },
+  CARD_INACTIVE: { bg: "var(--red-50)", color: "var(--red-700)", group: "REJECTED" },
+  REJECTED:      { bg: "var(--red-50)", color: "var(--red-700)", group: "REJECTED" },
+};
+const LEAD_FILTERS = [
+  { key: "ALL", label: "All" },
+  { key: "REVIEW", label: "In review" },
+  { key: "WAITING", label: "Awaiting arrival" },
+  { key: "ADMITTED", label: "Admitted" },
+  { key: "REJECTED", label: "Rejected" },
+];
 
 // Self-service portal for a hospital marketing-team member. Reached via their personal
 // QR/link (/marketing/:id) + a password only they know. Shows their own stats plus one
@@ -44,6 +64,12 @@ export default function MarketingPersonDashboard() {
 
   const [activeDirectory, setActiveDirectory] = useState([]);
   const [directorySearch, setDirectorySearch] = useState("");
+
+  // "My leads" — every lead this person submitted and where it stands (card check, awaiting
+  // arrival, admitted, rejected...), so they find out how a card check went without asking.
+  const [myLeads, setMyLeads] = useState([]);
+  const [myLeadsFilter, setMyLeadsFilter] = useState("ALL");
+  const [myLeadsLoading, setMyLeadsLoading] = useState(false);
 
   // -------------------- Submit a lead --------------------
   const [showLeadForm, setShowLeadForm] = useState(false);
@@ -87,6 +113,20 @@ export default function MarketingPersonDashboard() {
     } catch {
       // non-critical — the self-check list just stays empty/stale; the backend still enforces
       // the actual duplicate block regardless
+    }
+  }
+
+  async function loadMyLeads(activeToken) {
+    setMyLeadsLoading(true);
+    try {
+      const res = await axios.get(`${API_BASE}/marketing-persons/public/me/leads`, {
+        headers: { Authorization: `Bearer ${activeToken || token}` },
+      });
+      setMyLeads(res.data);
+    } catch {
+      // non-critical — the table just keeps whatever it last showed
+    } finally {
+      setMyLeadsLoading(false);
     }
   }
 
@@ -159,6 +199,7 @@ export default function MarketingPersonDashboard() {
       setShowLeadForm(false);
       loadReport(token); // refresh stats + leaders list, in case a new leader was just created
       loadActiveDirectory(token);
+      loadMyLeads(token);
     } catch (err) {
       if (err.response?.status === 409 && err.response?.data?.possibleDuplicate) {
         // Fuzzy (name + birth year) match, not a hard block — let them decide.
@@ -196,6 +237,7 @@ export default function MarketingPersonDashboard() {
     if (token) {
       loadReport(token);
       loadActiveDirectory(token);
+      loadMyLeads(token);
     }
   }, [token]);
 
@@ -285,7 +327,7 @@ export default function MarketingPersonDashboard() {
             <div style={{ display: "flex", alignItems: "center", gap: 2, fontSize: 10, color: "var(--ink-soft)", fontWeight: 700, textTransform: "uppercase" }}>
               Your leaders<ChevronRight size={12} />
             </div>
-            <div style={{ fontSize: 19, fontWeight: 700 }}>{data.leaders.length}</div>
+            <div style={{ fontSize: 19, fontWeight: 700, color: "var(--ink)" }}>{data.leaders.length}</div>
           </button>
           <div className="card" style={{ padding: "10px 8px", flex: 1, minWidth: 0 }}>
             <div style={{ fontSize: 10, color: "var(--ink-soft)", fontWeight: 700, textTransform: "uppercase" }}>Total leads</div>
@@ -347,6 +389,82 @@ export default function MarketingPersonDashboard() {
               })()
             )}
           </div>
+        </div>
+
+        <div className="card" style={{ marginBottom: 20 }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
+            <h4 style={{ margin: 0 }}>My leads</h4>
+            <button
+              type="button"
+              className="secondary"
+              title="Refresh"
+              disabled={myLeadsLoading}
+              style={{ width: "auto", padding: "5px 9px" }}
+              onClick={() => loadMyLeads(token)}
+            >
+              <RefreshCw size={14} className={myLeadsLoading ? "spin" : ""} />
+            </button>
+          </div>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 10 }}>
+            {LEAD_FILTERS.map((f) => {
+              const n = f.key === "ALL" ? myLeads.length : myLeads.filter((l) => STAGE_META[l.stage]?.group === f.key).length;
+              return (
+                <button
+                  key={f.key}
+                  type="button"
+                  className={myLeadsFilter === f.key ? "" : "secondary"}
+                  style={{ width: "auto", padding: "4px 10px", fontSize: 12 }}
+                  onClick={() => setMyLeadsFilter(f.key)}
+                >
+                  {f.label} ({n})
+                </button>
+              );
+            })}
+          </div>
+          {(() => {
+            const rows = myLeadsFilter === "ALL" ? myLeads : myLeads.filter((l) => STAGE_META[l.stage]?.group === myLeadsFilter);
+            if (rows.length === 0) {
+              return (
+                <p style={{ color: "var(--ink-soft)", fontSize: 13.5, margin: "8px 2px" }}>
+                  {myLeads.length === 0 ? "You haven't submitted any leads yet." : "No leads in this group."}
+                </p>
+              );
+            }
+            return (
+              <>
+                <div style={{ display: "grid", gridTemplateColumns: "1.4fr 1.3fr 0.6fr", gap: 8, padding: "0 2px 6px", borderBottom: "1.5px solid #e4e7ee", fontSize: 11, fontWeight: 700, color: "var(--ink-soft)", textTransform: "uppercase" }}>
+                  <span>Patient</span>
+                  <span>Status</span>
+                  <span style={{ textAlign: "right" }}>Sent</span>
+                </div>
+                <div style={{ maxHeight: 360, overflowY: "auto" }}>
+                  {rows.map((l) => {
+                    const meta = STAGE_META[l.stage] || { bg: "#eef0f4", color: "var(--ink-soft)" };
+                    return (
+                      <div
+                        key={l.id}
+                        style={{ display: "grid", gridTemplateColumns: "1.4fr 1.3fr 0.6fr", gap: 8, alignItems: "start", padding: "9px 2px", borderBottom: "1px solid #f0f1f5", fontSize: 13 }}
+                      >
+                        <div style={{ minWidth: 0 }}>
+                          <div style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{l.patientName}</div>
+                          <div style={{ color: "var(--ink-soft)", fontSize: 11.5, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                            via {l.leaderName}{l.cardType ? ` · ${l.cardType.charAt(0) + l.cardType.slice(1).toLowerCase()}` : ""}
+                          </div>
+                        </div>
+                        <div style={{ minWidth: 0 }}>
+                          <span className="badge" style={{ background: meta.bg, color: meta.color, fontSize: 11.5, padding: "2px 9px" }}>{l.label}</span>
+                          {l.note && <div style={{ color: "var(--ink-soft)", fontSize: 11.5, marginTop: 2, wordBreak: "break-word" }}>{l.note}</div>}
+                        </div>
+                        <span style={{ color: "var(--ink-soft)", fontSize: 12, textAlign: "right" }}>
+                          {new Date(l.submittedAt).toLocaleDateString("en-IN", { day: "2-digit", month: "short" })}
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </>
+            );
+          })()}
         </div>
 
         <div className="card" style={{ marginBottom: 20 }}>
