@@ -249,6 +249,9 @@ export default function StaffPortal() {
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", justifyContent: "flex-end" }}>
           <span style={{ color: "var(--ink-soft)" }}>{user?.name}</span>
+          {permissions.includes("VIEW_MY_MARKETING_TEAM") && (
+            <button className="secondary" style={{ width: "auto", padding: "6px 14px" }} onClick={() => navigate("/team")}>My team</button>
+          )}
           <NotificationBell />
           <button className="secondary" style={{ width: "auto", padding: "6px 14px" }} onClick={logout}>Log out</button>
         </div>

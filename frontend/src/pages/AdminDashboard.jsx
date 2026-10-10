@@ -51,7 +51,23 @@ const PERMISSION_LABELS = {
   EXPORT_REPORTS: "Export reports (PDF / Excel)",
   MANAGE_REFERRALS: "Confirm or reject referral arrivals",
   REDEEM_CREDITS: "Redeem (mark as paid out) doctor credit payouts",
+  VIEW_MY_MARKETING_TEAM: "View their own marketing team only — the people assigned to them, with those people's leaders and leads (read-only)",
 };
+// How the role builder groups the checkboxes, and the one-click starting points above them.
+const PERMISSION_GROUPS = [
+  { title: "Referrals", keys: ["VIEW_REFERRALS", "MANAGE_REFERRALS", "EXPORT_REPORTS"] },
+  { title: "Payouts", keys: ["REDEEM_CREDITS"] },
+  {
+    title: "Marketing team",
+    keys: ["VIEW_MY_MARKETING_TEAM"],
+    hint: "For a marketing head: after creating the role, add a staff account with it, then choose that person as the “Team head” when you add or edit marketing people. They'll only ever see the people assigned to them.",
+  },
+];
+const ROLE_PRESETS = [
+  { name: "Accountant", permissions: ["VIEW_REFERRALS", "EXPORT_REPORTS", "REDEEM_CREDITS"] },
+  { name: "Marketing head", permissions: ["VIEW_MY_MARKETING_TEAM"] },
+  { name: "Read-only viewer", permissions: ["VIEW_REFERRALS"] },
+];
 const REFERRAL_TABS = [
   { key: "CARD_REVIEW", label: "Card Activity" },
   { key: "PENDING", label: "Pending" },
@@ -1444,6 +1460,7 @@ export default function AdminDashboard() {
                           <td>
                             <div style={{ fontWeight: 600 }}>{m.name}</div>
                             <div style={{ fontSize: 12, color: "var(--ink-soft)" }}>{m.phone || "—"}</div>
+                            {m.headName && <div style={{ fontSize: 11.5, color: "var(--teal-600)", marginTop: 2 }}>Team head: {m.headName}</div>}
                             {!m.hasPassword && (
                               <div style={{ fontSize: 11, color: "#b45309", marginTop: 2 }}>No portal password set — edit to add one</div>
                             )}
@@ -1519,15 +1536,37 @@ export default function AdminDashboard() {
                 <form onSubmit={handleCreateRole} style={{ marginTop: 16 }}>
                   <label>Role name</label>
                   <input value={roleForm.name} onChange={(e) => setRoleForm({ ...roleForm, name: e.target.value })} required placeholder="e.g. Accountant" />
-                  <label>Permissions</label>
-                  <div style={{ display: "flex", flexDirection: "column", gap: 8, margin: "6px 0 16px" }}>
-                    {Object.entries(PERMISSION_LABELS).map(([key, label]) => (
-                      <label key={key} style={{ display: "flex", alignItems: "center", gap: 8, fontWeight: 400, fontSize: 14, color: "var(--ink)" }}>
-                        <input type="checkbox" style={{ width: "auto", margin: 0 }} checked={roleForm.permissions.includes(key)} onChange={() => togglePermission(key)} />
-                        {label}
-                      </label>
+                  <label>Start from a preset (optional)</label>
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 8, margin: "6px 0 16px" }}>
+                    {ROLE_PRESETS.map((p) => (
+                      <button
+                        key={p.name}
+                        type="button"
+                        className="secondary"
+                        style={{ width: "auto", padding: "5px 12px", fontSize: 13 }}
+                        onClick={() => setRoleForm((f) => ({ name: f.name || p.name, permissions: p.permissions }))}
+                      >
+                        {p.name}
+                      </button>
                     ))}
                   </div>
+                  <label>Permissions</label>
+                  {PERMISSION_GROUPS.map((g) => (
+                    <div key={g.title} style={{ margin: "10px 0 14px" }}>
+                      <div style={{ fontSize: 12, fontWeight: 700, color: "var(--ink-soft)", textTransform: "uppercase", marginBottom: 6 }}>{g.title}</div>
+                      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                        {g.keys.map((key) => (
+                          <label key={key} style={{ display: "flex", alignItems: "center", gap: 8, fontWeight: 400, fontSize: 14, color: "var(--ink)" }}>
+                            <input type="checkbox" style={{ width: "auto", margin: 0 }} checked={roleForm.permissions.includes(key)} onChange={() => togglePermission(key)} />
+                            {PERMISSION_LABELS[key]}
+                          </label>
+                        ))}
+                      </div>
+                      {g.hint && roleForm.permissions.some((p) => g.keys.includes(p)) && (
+                        <p style={{ fontSize: 12.5, color: "var(--ink-soft)", margin: "6px 0 0" }}>{g.hint}</p>
+                      )}
+                    </div>
+                  ))}
                   <button type="submit">{editingRoleId ? "Save changes" : "Create role"}</button>
                 </form>
               )}

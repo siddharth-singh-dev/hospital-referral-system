@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Save, UserPlus } from "lucide-react";
 import Modal from "./Modal";
 import api from "../api/client";
@@ -13,9 +13,15 @@ export default function MarketingPersonModal({ person, onClose, onSaved }) {
     phone: person?.phone || "",
     email: person?.email || "",
     password: "",
+    headId: person?.headId || "",
   });
+  const [heads, setHeads] = useState([]); // staff accounts that can act as a team head
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+
+  useEffect(() => {
+    api.get("/marketing-persons/heads").then(({ data }) => setHeads(data)).catch(() => {});
+  }, []);
 
   async function handleSubmit(e) {
     e.preventDefault();
@@ -26,7 +32,7 @@ export default function MarketingPersonModal({ person, onClose, onSaved }) {
     }
     setSaving(true);
     try {
-      const payload = { name: form.name, phone: form.phone, email: form.email };
+      const payload = { name: form.name, phone: form.phone, email: form.email, headId: form.headId || null };
       if (form.password.trim()) payload.password = form.password.trim();
 
       let result;
@@ -53,6 +59,19 @@ export default function MarketingPersonModal({ person, onClose, onSaved }) {
 
         <label>Email (optional)</label>
         <input type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} />
+
+        <label>Team head (optional)</label>
+        <select value={form.headId} onChange={(e) => setForm({ ...form, headId: e.target.value })}>
+          <option value="">— No team head —</option>
+          {heads.map((h) => (
+            <option key={h.id} value={h.id}>{h.name} · {h.roleName}</option>
+          ))}
+        </select>
+        <p style={{ fontSize: 12, color: "var(--ink-soft)", marginTop: -10 }}>
+          {heads.length === 0
+            ? "Nobody can be a team head yet. Create a role with “View their own marketing team”, then add a staff account with that role."
+            : "A team head can see only the people assigned to them, with their leaders and leads."}
+        </p>
 
         <label>{isEdit ? "Reset portal password (optional)" : "Portal password"}</label>
         <input

@@ -4,6 +4,16 @@ import api from "../api/client";
 
 const ROUTES = { SUPER_ADMIN: "/super-admin", ADMIN: "/admin", RECEPTION: "/reception", STAFF: "/staff" };
 
+// A staff account whose role is *only* "view my marketing team" (a team head) lands on the team
+// dashboard; anyone with referral permissions too still lands on the referrals portal.
+function landingPath(user) {
+  if (user.role === "STAFF") {
+    const perms = user.permissions || [];
+    if (perms.includes("VIEW_MY_MARKETING_TEAM") && perms.every((p) => p === "VIEW_MY_MARKETING_TEAM")) return "/team";
+  }
+  return ROUTES[user.role] || "/login";
+}
+
 export default function Login() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -19,7 +29,7 @@ export default function Login() {
       const { data } = await api.post("/auth/login", { email, password });
       localStorage.setItem("token", data.token);
       localStorage.setItem("user", JSON.stringify(data.user));
-      navigate(ROUTES[data.user.role] || "/login");
+      navigate(landingPath(data.user));
     } catch (err) {
       setError(err.response?.data?.error || "Login failed");
     } finally {

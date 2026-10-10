@@ -7,6 +7,7 @@ import DoctorDashboard from "./pages/DoctorDashboard";
 import MarketingPersonDashboard from "./pages/MarketingPersonDashboard";
 import SuperAdminDashboard from "./pages/SuperAdminDashboard";
 import StaffPortal from "./pages/StaffPortal";
+import MarketingHeadPortal from "./pages/MarketingHeadPortal";
 import ProtectedRoute from "./components/ProtectedRoute";
 
 export default function App() {
@@ -45,6 +46,14 @@ export default function App() {
           element={
             <ProtectedRoute role="STAFF">
               <StaffPortal />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/team"
+          element={
+            <ProtectedRoute role="STAFF">
+              <MarketingHeadPortal />
             </ProtectedRoute>
           }
         />

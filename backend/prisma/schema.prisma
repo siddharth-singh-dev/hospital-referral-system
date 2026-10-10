@@ -135,6 +135,11 @@ model MarketingPerson {
   // password) to see their own stats only — no admin/reception capabilities of any kind.
   passwordHash String?
 
+  // The staff account (a "team head") that oversees this person. Null = no head. A head can
+  // only ever see the marketing people whose headId points at them.
+  headId     String?
+  teamHead   StaffUser? @relation("MarketingTeamHead", fields: [headId], references: [id], onDelete: SetNull)
+
   doctors    Doctor[]
 }
 
@@ -165,6 +170,9 @@ model StaffUser {
   customRoleId String?
   customRole   CustomRole? @relation(fields: [customRoleId], references: [id])
   createdAt    DateTime    @default(now())
+
+  // Marketing people this account heads (only meaningful for roles with VIEW_MY_MARKETING_TEAM)
+  marketingTeam MarketingPerson[] @relation("MarketingTeamHead")
 }
 
 model Doctor {
