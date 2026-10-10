@@ -1394,7 +1394,7 @@ router.post("/:id/revert", requireAuth, requireRole("ADMIN"), async (req, res) =
 
   const updated = await prisma.referral.update({
     where: { id: req.params.id },
-    data: { status: "PENDING", rejectedReason: null },
+    data: { status: "PENDING", rejectedReason: null, reopenedAt: new Date() },
   });
 
   logActivity({

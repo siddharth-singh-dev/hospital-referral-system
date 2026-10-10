@@ -263,6 +263,11 @@ model Referral {
   // Pending without having to phone anyone. Max 300 chars; null when none was given.
   leadNote        String?        @db.VarChar(300)
 
+  // Set when an admin reverts a rejected lead back to PENDING. The auto-reject timer
+  // (src/utils/autoReject.js) counts from this instead of createdAt when it's set, so a
+  // reverted lead gets a fresh window rather than being rejected again straight away.
+  reopenedAt      DateTime?
+
   createdAt       DateTime       @default(now())
 
   transaction     CreditTransaction?
