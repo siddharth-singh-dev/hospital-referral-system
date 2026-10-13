@@ -15,6 +15,7 @@ import { formatDate, formatDateTime } from "../utils/formatDate.js";
 import { logActivity, diffFields, ACTIONS } from "../utils/activityLog.js";
 import { notify, NOTIFICATION_TYPES } from "../utils/notifications.js";
 import { normalizePanel } from "../utils/panels.js";
+import { checkCardPanelPair, needsCardReview, photoRequired } from "../utils/cardPanelRules.js";
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024 } });
 
@@ -1573,38 +1574,42 @@ router.post("/marketing-submit", requireAuth, requireRole("MARKETING"), uploadAt
   const idNumber = (body.idNumber || "").trim();
   const confirmDuplicate = body.confirmDuplicate === "true";
 
-  if (!patientName) return res.status(400).json({ error: "Patient name is required" });
+  // multer has already written the upload to disk by the time we get here, so every rejection
+  // below deletes it — otherwise each blocked duplicate or invalid lead would leave an orphaned
+  // patient ID photo behind.
+  const reject = (status, payload) => {
+    if (req.file) fs.unlink(req.file.path, () => {});
+    return res.status(status).json(payload);
+  };
+
+  if (!patientName) return reject(400, { error: "Patient name is required" });
   if (!Number.isInteger(patientAge) || patientAge < 0 || patientAge > 130) {
-    return res.status(400).json({ error: "A valid patient age is required" }); // 0 is valid — a newborn is genuinely 0 years old
+    return reject(400, { error: "A valid patient age is required" }); // 0 is valid — a newborn is genuinely 0 years old
   }
   if (!["MALE", "FEMALE", "OTHER"].includes(patientGender)) {
-    return res.status(400).json({ error: "Patient gender is required" });
+    return reject(400, { error: "Patient gender is required" });
   }
-  // The panel (insurer / scheme / "Cash") is mandatory so reception knows how the patient will
-  // be billed. The upload is already on disk by the time we get here, so drop it on rejection
-  // rather than leaving an orphaned ID photo behind.
   const panel = normalizePanel(body.panel);
-  if (!panel) {
-    if (req.file) fs.unlink(req.file.path, () => {});
-    return res.status(400).json({ error: "Select the patient's panel" });
-  }
   const leadNote = (body.leadNote || "").trim();
-  if (leadNote.length > 300) {
-    if (req.file) fs.unlink(req.file.path, () => {});
-    return res.status(400).json({ error: "Keep the note to 300 characters or fewer" });
-  }
+  if (leadNote.length > 300) return reject(400, { error: "Keep the note to 300 characters or fewer" });
   if (!leaderId && !newLeaderName) {
-    return res.status(400).json({ error: "Tell us which leader passed you this lead — pick one from your list or type a new name" });
+    return reject(400, { error: "Tell us which leader passed you this lead — pick one from your list or type a new name" });
   }
-  // A photo is genuinely optional — sometimes there's nothing to attach (a leader phoned the
-  // details in with no card in hand). What actually has to be captured, one way or another, is
-  // the card TYPE and (for anything but "Other") the ID NUMBER — those are what make duplicate
-  // detection possible, and neither strictly needs a photo behind it.
   if (!CARD_TYPES_FOR_SUBMIT.includes(cardType)) {
-    return res.status(400).json({ error: `Select what kind of card/document this is (${CARD_TYPES_FOR_SUBMIT.join(", ")})` });
+    return reject(400, { error: `Select what kind of card/document this is (${CARD_TYPES_FOR_SUBMIT.join(", ")})` });
   }
+  // The card type and the panel have to agree (see utils/cardPanelRules.js). The panel is
+  // required for every card type except "Other".
+  const pairError = checkCardPanelPair(cardType, panel);
+  if (pairError) return reject(400, { error: pairError });
   if (cardType !== "OTHER" && !idNumber) {
-    return res.status(400).json({ error: "The card/ID number is required for this card type" });
+    return reject(400, { error: "The card/ID number is required for this card type" });
+  }
+  // For a government-scheme card or panel the photo is required — unless the person has said
+  // "No photo available" (noPhoto), in which case the typed card number above stands in for it.
+  // For anything else a photo stays optional.
+  if (photoRequired(cardType, panel) && !req.file && body.noPhoto !== "true") {
+    return reject(400, { error: "Attach a photo of the card, or choose “No photo available” and enter the card number" });
   }
 
   // Hard block: an existing active lead with the same (usable) ID number, anywhere in the
@@ -1618,7 +1623,7 @@ router.post("/marketing-submit", requireAuth, requireRole("MARKETING"), uploadAt
       });
       existingActiveMatch = candidates.find((c) => normalizeIdNumber(c.idNumber) === normalizedId);
       if (existingActiveMatch) {
-        return res.status(409).json({
+        return reject(409, {
           error: `This card is already on an active lead for ${existingActiveMatch.patientName} (${existingActiveMatch.status.replace("_", " ").toLowerCase()}). It can't be submitted again until that one is discharged or rejected.`,
         });
       }
@@ -1637,7 +1642,7 @@ router.post("/marketing-submit", requireAuth, requireRole("MARKETING"), uploadAt
         (c) => c.patientName.trim().toUpperCase().replace(/\s+/g, " ") === normalizedName && Math.abs(c.patientAge - patientAge) <= 1
       );
       if (possibleMatch) {
-        return res.status(409).json({
+        return reject(409, {
           possibleDuplicate: true,
           error: `A lead for ${possibleMatch.patientName} (age ~${possibleMatch.patientAge}) already looks active (${possibleMatch.status.replace("_", " ").toLowerCase()}). Submit anyway if this is genuinely a different person?`,
         });
@@ -1650,20 +1655,19 @@ router.post("/marketing-submit", requireAuth, requireRole("MARKETING"), uploadAt
     // Must actually be one of THIS marketing person's own leaders — never trust a raw id from
     // the client to reach into someone else's leader list.
     doctor = await prisma.doctor.findFirst({ where: { id: leaderId, marketingPersonId: req.user.marketingPersonId } });
-    if (!doctor) return res.status(404).json({ error: "That leader wasn't found in your list" });
+    if (!doctor) return reject(404, { error: "That leader wasn't found in your list" });
   } else {
     doctor = await prisma.doctor.create({
       data: { name: newLeaderName, hospitalId: req.user.hospitalId, marketingPersonId: req.user.marketingPersonId },
     });
   }
 
-  // Only an Ayushman card needs reception to manually verify it's still active before the lead
-  // can enter the normal queue (scheme status commonly lapses and isn't something OCR or this
-  // system can check on its own). Every other type — CGHS/ECHS/CAPF/Aadhaar/Other, including
-  // cash patients sent with just a prescription — goes straight to Pending, with any attached
-  // photo carried along on the referral for reception to look at.
-  const CARD_TYPES_NEEDING_VERIFICATION = ["AYUSHMAN"];
-  const needsCardCheck = CARD_TYPES_NEEDING_VERIFICATION.includes(cardType);
+  // Card Activity: a lead with an Ayushman card or an Ayushman panel (AYUSHMAN BHARAT /
+  // AYUSHMAN CAPF) needs reception to verify the card is still active before it can move on
+  // (scheme status commonly lapses and isn't something OCR or this system can check). Every
+  // other lead — CGHS/ECHS/CAPF/Aadhaar/Other, including cash patients sent with just a
+  // prescription — goes straight to Pending, with any attached photo carried on the referral.
+  const needsCardCheck = needsCardReview(cardType, panel);
 
   const referral = await prisma.referral.create({
     data: {

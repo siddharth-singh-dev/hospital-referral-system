@@ -5,6 +5,7 @@ import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGri
 import { Lock, TrendingUp, LogOut, UserPlus, Paperclip, ChevronRight, X, RefreshCw } from "lucide-react";
 import Modal from "../components/Modal";
 import CardScanUpload, { CARD_TYPES } from "../components/CardScanUpload";
+import { pairError, photoRequiredFor, panelOptionsForCard, cardOptionsForPanel } from "../utils/cardPanelRules";
 import { PANEL_OPTIONS } from "../utils/panels";
 
 const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:4000/api";
@@ -66,12 +67,40 @@ export default function MarketingPersonDashboard() {
   const [havePhoto, setHavePhoto] = useState(true); // false = "no photo available" — declare type/ID manually instead
   const [attachmentFile, setAttachmentFile] = useState(null);
   const [attachmentCardType, setAttachmentCardType] = useState("");
+  const [lastEdited, setLastEdited] = useState(""); // "panel" | "card": whichever the person set last — the OTHER one is the one that gets narrowed/locked to match
   const [submittingLead, setSubmittingLead] = useState(false);
   const [leadError, setLeadError] = useState("");
   const [leadSuccess, setLeadSuccess] = useState("");
   const [pendingDuplicateWarning, setPendingDuplicateWarning] = useState(""); // set once the backend warns of a possible (non-card) duplicate; submitting again proceeds past it
 
   const computedAge = birthYear ? CURRENT_YEAR - Number(birthYear) : "";
+
+  // Panel and card type are tied together (see utils/cardPanelRules.js): whichever is picked
+  // first narrows — and for the government schemes, locks — the other.
+  const allCardValues = CARD_TYPES.map((c) => c.value);
+  const panelChoices = lastEdited === "card" ? panelOptionsForCard(attachmentCardType) : PANEL_OPTIONS;
+  const cardChoices = lastEdited === "panel" ? cardOptionsForPanel(leadPanel, allCardValues) : allCardValues;
+  const panelLocked = lastEdited === "card" && panelChoices.length === 1;
+  const cardLocked = lastEdited === "panel" && cardChoices.length === 1;
+  const photoNeeded = photoRequiredFor(attachmentCardType, leadPanel);
+
+  function handleCardTypeChange(c) {
+    setAttachmentCardType(c);
+    setPendingDuplicateWarning("");
+    setLastEdited("card");
+    const panels = panelOptionsForCard(c);
+    if (panels.length === 1) setLeadPanel(panels[0]);
+    else if (leadPanel && !panels.includes(leadPanel)) setLeadPanel("");
+  }
+  function handlePanelChange(p) {
+    setLeadPanel(p);
+    setPendingDuplicateWarning("");
+    if (attachmentCardType === "AADHAAR") return; // Aadhaar goes with any panel — leave the card alone
+    setLastEdited("panel");
+    const cards = cardOptionsForPanel(p, allCardValues);
+    if (cards.length === 1) setAttachmentCardType(cards[0]);
+    else if (attachmentCardType && !cards.includes(attachmentCardType)) setAttachmentCardType("");
+  }
 
   function resetLeadForm() {
     setLeaderChoice("");
@@ -85,6 +114,7 @@ export default function MarketingPersonDashboard() {
     setHavePhoto(true);
     setAttachmentFile(null);
     setAttachmentCardType("");
+    setLastEdited("");
     setPendingDuplicateWarning("");
   }
 
@@ -133,7 +163,11 @@ export default function MarketingPersonDashboard() {
         setBirthYear(String(CURRENT_YEAR - ocrResult.patientAge));
       }
       if (ocrResult.patientGender) setLeadGender(ocrResult.patientGender);
-      if (ocrResult.panel) setLeadPanel(ocrResult.panel);
+      // Fill the panel from the card only if none is chosen yet (or to upgrade CAPF to AYUSHMAN CAPF
+      // when the card carries an Ayushman ID), and only if it fits the card type.
+      if (ocrResult.panel && !pairError(meta.cardType, ocrResult.panel) && (!leadPanel || (leadPanel === "CAPF" && ocrResult.panel === "AYUSHMAN CAPF"))) {
+        setLeadPanel(ocrResult.panel);
+      }
       if (ocrResult.idNumberMasked) setIdNumber(ocrResult.idNumberMasked);
     }
   }
@@ -153,16 +187,21 @@ export default function MarketingPersonDashboard() {
       setLeadError("Select the patient's birth year.");
       return;
     }
-    if (!leadPanel) {
-      setLeadError("Select the patient's panel.");
-      return;
-    }
     if (!attachmentCardType) {
       setLeadError("Select what kind of card/document this is.");
       return;
     }
+    const mismatch = pairError(attachmentCardType, leadPanel);
+    if (mismatch) {
+      setLeadError(`${mismatch}.`);
+      return;
+    }
     if (attachmentCardType !== "OTHER" && !idNumber.trim()) {
       setLeadError("Enter the card/ID number (or re-scan if it wasn't read correctly).");
+      return;
+    }
+    if (havePhoto && !attachmentFile) {
+      setLeadError("Add the card photo, or tap “No photo available”.");
       return;
     }
     setSubmittingLead(true);
@@ -171,7 +210,8 @@ export default function MarketingPersonDashboard() {
       formData.append("patientName", leadName.trim());
       formData.append("patientAge", computedAge);
       formData.append("patientGender", leadGender);
-      formData.append("panel", leadPanel);
+      if (leadPanel) formData.append("panel", leadPanel);
+      if (!havePhoto) formData.append("noPhoto", "true"); // the person said there is no photo — the typed card number stands in
       if (leadNote.trim()) formData.append("leadNote", leadNote.trim());
       if (leaderChoice === "__new__") formData.append("newLeaderName", newLeaderName.trim());
       else formData.append("leaderId", leaderChoice);
@@ -570,11 +610,12 @@ export default function MarketingPersonDashboard() {
               ))}
             </div>
 
-            <label>Panel</label>
-            <select value={leadPanel} onChange={(e) => setLeadPanel(e.target.value)} required>
-              <option value="">Select panel…</option>
-              {PANEL_OPTIONS.map((p) => <option key={p} value={p}>{p}</option>)}
+            <label>Panel{attachmentCardType === "OTHER" ? " (optional)" : ""}</label>
+            <select value={leadPanel} onChange={(e) => handlePanelChange(e.target.value)} required={attachmentCardType !== "OTHER"} disabled={panelLocked}>
+              <option value="">{attachmentCardType === "OTHER" ? "— None —" : "Select panel…"}</option>
+              {panelChoices.map((p) => <option key={p} value={p}>{p}</option>)}
             </select>
+            {panelLocked && <p style={{ fontSize: 11.5, color: "var(--ink-soft)", marginTop: -10, marginBottom: 10 }}>Set by the card type — change the card type to change this.</p>}
 
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 4 }}>
               <label style={{ margin: 0 }}>{havePhoto ? "Card / document photo" : "Card / document details"}</label>
@@ -583,10 +624,8 @@ export default function MarketingPersonDashboard() {
                 className="secondary"
                 style={{ width: "auto", padding: "3px 10px", fontSize: 12 }}
                 onClick={() => {
-                  const next = !havePhoto;
-                  setHavePhoto(next);
+                  setHavePhoto(!havePhoto);
                   setAttachmentFile(null);
-                  if (next) setAttachmentCardType(""); // switching back to photo mode: let a scan set it fresh
                 }}
               >
                 {havePhoto ? "No photo available" : "I have a photo"}
@@ -595,7 +634,15 @@ export default function MarketingPersonDashboard() {
 
             {havePhoto ? (
               <>
-                <CardScanUpload authToken={token} onExtracted={handleCardScanned} />
+                <CardScanUpload
+                  authToken={token}
+                  onExtracted={handleCardScanned}
+                  cardType={attachmentCardType}
+                  onCardTypeChange={handleCardTypeChange}
+                  allowedCardTypes={cardChoices}
+                  cardTypeLocked={cardLocked}
+                />
+                {cardLocked && <p style={{ fontSize: 11.5, color: "var(--ink-soft)", marginTop: -10, marginBottom: 8 }}>Set by the panel — change the panel to change this.</p>}
                 {attachmentFile && (
                   <p style={{ fontSize: 12.5, color: "var(--ink-soft)", marginTop: -10, marginBottom: 8, display: "flex", alignItems: "center", gap: 6 }}>
                     <Paperclip size={12} />Attached — {attachmentCardType === "OTHER" ? "other document" : `${attachmentCardType} card`}
@@ -603,7 +650,7 @@ export default function MarketingPersonDashboard() {
                       type="button"
                       className="secondary"
                       style={{ width: "auto", padding: "2px 6px", marginLeft: "auto" }}
-                      onClick={() => { setAttachmentFile(null); setAttachmentCardType(""); setIdNumber(""); }}
+                      onClick={() => { setAttachmentFile(null); setIdNumber(""); }}
                     >
                       <X size={12} />
                     </button>
@@ -613,10 +660,12 @@ export default function MarketingPersonDashboard() {
             ) : (
               <>
                 <label>What kind of card is this?</label>
-                <select value={attachmentCardType} onChange={(e) => { setAttachmentCardType(e.target.value); setPendingDuplicateWarning(""); }} required>
+                <select value={attachmentCardType} onChange={(e) => handleCardTypeChange(e.target.value)} required disabled={cardLocked}>
                   <option value="">— Select —</option>
-                  {CARD_TYPES.map((c) => <option key={c.value} value={c.value}>{c.label}</option>)}
+                  {CARD_TYPES.filter((c) => cardChoices.includes(c.value)).map((c) => <option key={c.value} value={c.value}>{c.label}</option>)}
                 </select>
+                {cardLocked && <p style={{ fontSize: 11.5, color: "var(--ink-soft)", marginTop: -10, marginBottom: 8 }}>Set by the panel — change the panel to change this.</p>}
+                {photoNeeded && <p style={{ fontSize: 11.5, color: "var(--amber-700, #b45309)", marginTop: -6, marginBottom: 8 }}>No photo: reception will check this card by its number only.</p>}
               </>
             )}
 
@@ -628,7 +677,7 @@ export default function MarketingPersonDashboard() {
             )}
 
             <p style={{ fontSize: 11.5, color: "var(--ink-soft)", marginTop: -2, marginBottom: 8 }}>
-              Ayushman cards need reception to verify them before the lead moves to Pending — every other lead goes straight to Pending.
+              Ayushman and Ayushman CAPF leads need reception to verify the card before they move to Pending — every other lead goes straight to Pending.
             </p>
 
             <label>Note for reception (optional)</label>

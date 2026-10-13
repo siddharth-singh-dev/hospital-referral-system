@@ -6,6 +6,7 @@ import { z } from "zod";
 import prisma from "../utils/prismaClient.js";
 import { requireAuth, requireRole, requireAccess } from "../middleware/auth.js";
 import { TEAM_HEAD_PERMISSION } from "../utils/permissions.js";
+import { needsCardReview } from "../utils/cardPanelRules.js";
 import { startOfIstDay, istDateString } from "../utils/istDate.js";
 import { logActivity, diffFields, ACTIONS } from "../utils/activityLog.js";
 
@@ -302,10 +303,9 @@ router.get("/public/me", requireAuth, requireRole("MARKETING"), async (req, res)
   res.json(await buildPersonDetail(person));
 });
 
-// Only Ayushman cards are verified by reception (CARD_REVIEW) before a lead can move on. For
-// these, a lead that's now PENDING (or further) got there because reception marked the card
-// active. Every other type goes straight to PENDING at submission and is never "card checked".
-const CARD_TYPES_NEEDING_CHECK = ["AYUSHMAN"];
+// Which leads go through reception's card check (CARD_REVIEW) is decided by needsCardReview() in
+// utils/cardPanelRules.js — an Ayushman card or an Ayushman panel. A lead that's now PENDING (or
+// further) and was one of those got there because reception marked the card active.
 const DEFAULT_CARD_INACTIVE_REASON = "Card not active"; // what POST /referrals/:id/verify-card writes
 
 // Collapses a referral's raw status + timestamps into the one stage a marketing person cares
@@ -316,7 +316,7 @@ function leadStage(r) {
     case "CARD_REVIEW":
       return { stage: "CARD_REVIEW", label: "Card under review", note: "Waiting for reception" };
     case "PENDING":
-      return CARD_TYPES_NEEDING_CHECK.includes(r.idType)
+      return needsCardReview(r.idType, r.panel)
         ? { stage: "CARD_ACTIVE", label: "Card active", note: "Awaiting arrival" }
         : { stage: "PENDING", label: "Awaiting arrival", note: null };
     case "CREDITED":
@@ -402,7 +402,7 @@ router.get("/team/overview", ...teamHeadAccess, async (req, res) => {
   const referrals = personByDoctor.size
     ? await prisma.referral.findMany({
         where: { doctorId: { in: [...personByDoctor.keys()] } },
-        select: { doctorId: true, status: true, idType: true, visitType: true, dischargedAt: true, rejectedReason: true, createdAt: true },
+        select: { doctorId: true, status: true, idType: true, panel: true, visitType: true, dischargedAt: true, rejectedReason: true, createdAt: true },
       })
     : [];
 

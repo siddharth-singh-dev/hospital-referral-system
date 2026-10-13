@@ -86,8 +86,17 @@ const CAN_USE_CAMERA = typeof navigator !== "undefined" && !!navigator.mediaDevi
 // onExtracted(data, meta) — data is the OCR result (or null for "Other"/on failure before a
 // result exists), meta is always { file, cardType } so a caller that also needs to attach the
 // underlying photo (not just the OCR text) can do so, regardless of whether OCR succeeded.
-export default function CardScanUpload({ doctorCode, authToken, onExtracted }) {
-  const [cardType, setCardType] = useState("AADHAAR");
+//
+// By default the card type lives in here (starting at Aadhaar). A caller can instead own it by
+// passing cardType + onCardTypeChange — and optionally narrow the choices (allowedCardTypes) or
+// lock it (cardTypeLocked). The marketing portal does this so the card type and the Panel can be
+// tied together; while no type is chosen the photo buttons stay disabled.
+export default function CardScanUpload({ doctorCode, authToken, onExtracted, cardType: cardTypeProp, onCardTypeChange, allowedCardTypes, cardTypeLocked }) {
+  const controlled = cardTypeProp !== undefined;
+  const [innerCardType, setInnerCardType] = useState("AADHAAR");
+  const cardType = controlled ? cardTypeProp : innerCardType;
+  const needsCardType = controlled && !cardType;
+  const typeOptions = allowedCardTypes ? CARD_TYPES.filter((c) => allowedCardTypes.includes(c.value)) : CARD_TYPES;
   const [scanning, setScanning] = useState(false);
   const [error, setError] = useState("");
   const fileInputRef = useRef(null);
@@ -236,15 +245,22 @@ export default function CardScanUpload({ doctorCode, authToken, onExtracted }) {
         onChange={handleFile}
       />
 
-      <select value={cardType} onChange={(e) => setCardType(e.target.value)} style={{ width: "100%", marginBottom: 8 }} disabled={scanning}>
-        {CARD_TYPES.map((c) => <option key={c.value} value={c.value}>{c.label}</option>)}
+      <select
+        value={cardType}
+        onChange={(e) => (controlled ? onCardTypeChange?.(e.target.value) : setInnerCardType(e.target.value))}
+        style={{ width: "100%", marginBottom: 8 }}
+        disabled={scanning || cardTypeLocked}
+      >
+        {controlled && <option value="">— Select card type —</option>}
+        {typeOptions.map((c) => <option key={c.value} value={c.value}>{c.label}</option>)}
       </select>
+      {needsCardType && <p style={{ fontSize: 12, color: "var(--ink-soft)", margin: "-2px 0 8px" }}>Choose the card type first, then add the photo.</p>}
       <div style={{ display: "flex", gap: 8 }}>
         <button
           type="button"
           className="secondary"
           style={{ flex: 1, padding: "8px 12px", whiteSpace: "nowrap" }}
-          disabled={scanning}
+          disabled={scanning || needsCardType}
           onClick={() => fileInputRef.current?.click()}
         >
           {scanning ? <Loader2 size={15} className="spin" /> : <ScanLine size={15} />}
@@ -255,7 +271,7 @@ export default function CardScanUpload({ doctorCode, authToken, onExtracted }) {
             type="button"
             className="secondary"
             style={{ flex: 1, padding: "8px 12px", whiteSpace: "nowrap" }}
-            disabled={scanning}
+            disabled={scanning || needsCardType}
             onClick={openCamera}
           >
             <Camera size={15} />Use camera
