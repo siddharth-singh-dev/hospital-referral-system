@@ -59,7 +59,7 @@ export default function MarketingPersonReferralsModal({ marketingPersonId, marke
               {referrals.map((r) => (
                 <tr key={r.id}>
                   <td>{r.fileNumber || "—"}</td>
-                  <td>{r.patientName}{r.hasAttachment && <AttachmentIcon referralId={r.id} />}</td>
+                  <td>{r.patientName}{r.hasAttachment && <AttachmentIcon referralId={r.id} />}{r.hasExtraAttachment && <AttachmentIcon referralId={r.id} kind="extra" />}</td>
                   <td>{formatDate(r.doa)}</td>
                   <td style={{ color: "var(--teal-700)", fontWeight: r.paidAmount != null ? 600 : 400 }}>
                     {r.paidAmount != null ? `${r.paidAmount.toFixed(2)} pts` : "—"}

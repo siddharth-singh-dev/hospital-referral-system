@@ -292,7 +292,7 @@ export default function ReceptionDashboard() {
                 {visibleReferrals.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE).map((r) => (
                   <tr key={r.id} style={r.status === "CREDITED" && r.dischargedAt ? { background: "#fef3c7" } : undefined}>
                     <td>
-                      <div className="cell-primary">{r.patientName}{r.attachmentPath && <AttachmentIcon referralId={r.id} />}</div>
+                      <div className="cell-primary">{r.patientName}{r.attachmentPath && <AttachmentIcon referralId={r.id} />}{r.extraAttachmentPath && <AttachmentIcon referralId={r.id} kind="extra" />}</div>
                       <div className="cell-secondary">
                         {r.patientAge}{r.patientGender ? `${r.patientGender.charAt(0)}` : ""}
                         {r.fileNumber ? ` · ${r.fileNumber}` : ""}

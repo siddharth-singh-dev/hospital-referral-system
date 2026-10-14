@@ -1102,7 +1102,7 @@ export default function AdminDashboard() {
                                 <div style={{ paddingLeft: 8, paddingBottom: 8 }}>
                                   {r.referrals.map((ref) => (
                                     <div key={ref.id} style={{ padding: "5px 4px", fontSize: 12.5, borderTop: "1px dashed var(--border)" }}>
-                                      <div style={{ color: "var(--ink)" }}>{ref.patientName}{ref.hasAttachment && <AttachmentIcon referralId={ref.id} />}</div>
+                                      <div style={{ color: "var(--ink)" }}>{ref.patientName}{ref.hasAttachment && <AttachmentIcon referralId={ref.id} />}{ref.hasExtraAttachment && <AttachmentIcon referralId={ref.id} kind="extra" />}</div>
                                       <div style={{ color: "var(--ink-soft)" }}>
                                         via {ref.leaderName}{ref.marketingPersonName ? ` · ${ref.marketingPersonName}` : ""} · {formatDate(ref.createdAt)}
                                       </div>
@@ -1770,7 +1770,7 @@ export default function AdminDashboard() {
                   {referrals.map((r) => (
                     <tr key={r.id} style={r.status === "CREDITED" && r.dischargedAt ? { background: "#fef3c7" } : undefined}>
                       <td>
-                        <div className="cell-primary">{r.patientName}{r.attachmentPath && <AttachmentIcon referralId={r.id} />}</div>
+                        <div className="cell-primary">{r.patientName}{r.attachmentPath && <AttachmentIcon referralId={r.id} />}{r.extraAttachmentPath && <AttachmentIcon referralId={r.id} kind="extra" />}</div>
                         <div className="cell-secondary">
                           {r.patientAge}{r.patientGender ? `${r.patientGender.charAt(0)}` : ""}
                           {r.fileNumber ? ` · ${r.fileNumber}` : ""}

@@ -266,6 +266,10 @@ model Referral {
   // ID documents. Null for every other referral-creation path.
   attachmentPath  String?
 
+  // An optional second file the marketing person can send along with the card photo — typically
+  // a prescription (photo or PDF). Served by GET /referrals/:id/attachment/extra.
+  extraAttachmentPath String?
+
   // A short free-text note the marketing person sends along with the lead (e.g. "cash patient,
   // prescription attached, wants a private room") so reception sees it in Card Activity /
   // Pending without having to phone anyone. Max 300 chars; null when none was given.

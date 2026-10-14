@@ -5,6 +5,7 @@ import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGri
 import { Lock, TrendingUp, LogOut, UserPlus, Paperclip, ChevronRight, X, RefreshCw } from "lucide-react";
 import Modal from "../components/Modal";
 import CardScanUpload, { CARD_TYPES } from "../components/CardScanUpload";
+import ExtraAttachmentPicker from "../components/ExtraAttachmentPicker";
 import { pairError, photoRequiredFor, panelOptionsForCard, cardOptionsForPanel } from "../utils/cardPanelRules";
 import { PANEL_OPTIONS } from "../utils/panels";
 
@@ -63,6 +64,7 @@ export default function MarketingPersonDashboard() {
   const [leadGender, setLeadGender] = useState("MALE");
   const [leadPanel, setLeadPanel] = useState("");
   const [leadNote, setLeadNote] = useState(""); // optional message for reception, shown on the lead
+  const [extraFile, setExtraFile] = useState(null); // optional extra document (e.g. a prescription) sent along with the card photo
   const [idNumber, setIdNumber] = useState("");
   const [havePhoto, setHavePhoto] = useState(true); // false = "no photo available" — declare type/ID manually instead
   const [attachmentFile, setAttachmentFile] = useState(null);
@@ -110,6 +112,7 @@ export default function MarketingPersonDashboard() {
     setLeadGender("MALE");
     setLeadPanel("");
     setLeadNote("");
+    setExtraFile(null);
     setIdNumber("");
     setHavePhoto(true);
     setAttachmentFile(null);
@@ -213,6 +216,7 @@ export default function MarketingPersonDashboard() {
       if (leadPanel) formData.append("panel", leadPanel);
       if (!havePhoto) formData.append("noPhoto", "true"); // the person said there is no photo — the typed card number stands in
       if (leadNote.trim()) formData.append("leadNote", leadNote.trim());
+      if (extraFile) formData.append("extraAttachment", extraFile);
       if (leaderChoice === "__new__") formData.append("newLeaderName", newLeaderName.trim());
       else formData.append("leaderId", leaderChoice);
       if (attachmentFile) formData.append("attachment", attachmentFile);
@@ -679,6 +683,8 @@ export default function MarketingPersonDashboard() {
                 </button>
               ))}
             </div>
+
+            <ExtraAttachmentPicker file={extraFile} onChange={setExtraFile} />
 
             <label>Note for reception (optional)</label>
             <textarea

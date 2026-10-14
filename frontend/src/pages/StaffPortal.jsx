@@ -365,7 +365,7 @@ export default function StaffPortal() {
                 <tbody>
                   {referrals.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE).map((r) => (
                     <tr key={r.id} style={r.status === "CREDITED" && r.dischargedAt ? { background: "#fef3c7" } : undefined}>
-                      <td>{r.patientName}{r.attachmentPath && <AttachmentIcon referralId={r.id} />}{r.leadNote && <LeadNote text={r.leadNote} />}</td>
+                      <td>{r.patientName}{r.attachmentPath && <AttachmentIcon referralId={r.id} />}{r.extraAttachmentPath && <AttachmentIcon referralId={r.id} kind="extra" />}{r.leadNote && <LeadNote text={r.leadNote} />}</td>
                       <td>{r.fileNumber || "—"}</td>
                       <td>{r.patientAge}</td>
                       <td>{r.patientGender ? r.patientGender.charAt(0) + r.patientGender.slice(1).toLowerCase() : "—"}</td>

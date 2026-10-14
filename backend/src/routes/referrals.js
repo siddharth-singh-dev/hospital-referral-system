@@ -28,20 +28,42 @@ const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 *
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ATTACHMENTS_DIR = path.join(__dirname, "..", "..", "uploads", "referral-attachments");
 fs.mkdirSync(ATTACHMENTS_DIR, { recursive: true });
+// What can be attached, and the file extension each type is stored with. The extension comes from
+// the (checked) type, never from the uploader's filename, so a file can't be stored as ".html"
+// or similar and then be served to a browser as a web page.
+const ATTACHMENT_EXTENSIONS = {
+  "image/jpeg": ".jpg",
+  "image/png": ".png",
+  "image/webp": ".webp",
+  "image/heic": ".heic",
+  "image/heif": ".heif",
+  "application/pdf": ".pdf",
+};
 const uploadAttachment = multer({
   storage: multer.diskStorage({
     destination: ATTACHMENTS_DIR,
-    filename: (req, file, cb) => {
-      const ext = path.extname(file.originalname || "").slice(0, 10) || "";
-      cb(null, `${randomUUID()}${ext}`);
-    },
+    filename: (req, file, cb) => cb(null, `${randomUUID()}${ATTACHMENT_EXTENSIONS[file.mimetype] || ""}`),
   }),
   limits: { fileSize: 8 * 1024 * 1024 },
-  fileFilter: (req, file, cb) => {
-    const allowed = ["image/jpeg", "image/png", "image/webp", "image/heic", "image/heif", "application/pdf"];
-    cb(null, allowed.includes(file.mimetype));
-  },
+  // Reject, rather than silently drop, a type we don't accept — otherwise the lead would be saved
+  // while the person believes their file was attached.
+  fileFilter: (req, file, cb) =>
+    ATTACHMENT_EXTENSIONS[file.mimetype] ? cb(null, true) : cb(new Error("UNSUPPORTED_ATTACHMENT_TYPE")),
 });
+// A lead can carry two optional files: the card photo ("attachment") and an extra document such
+// as a prescription ("extraAttachment"). Upload problems come back as a clear 400.
+const uploadLeadFiles = (req, res, next) =>
+  uploadAttachment.fields([
+    { name: "attachment", maxCount: 1 },
+    { name: "extraAttachment", maxCount: 1 },
+  ])(req, res, (err) => {
+    if (!err) return next();
+    const message =
+      err.code === "LIMIT_FILE_SIZE" ? "That file is too large — 8 MB is the maximum"
+      : err.message === "UNSUPPORTED_ATTACHMENT_TYPE" ? "Only photos (JPG, PNG, WebP) and PDFs can be attached"
+      : "Could not upload the file — please try again";
+    res.status(400).json({ error: message });
+  });
 
 const router = express.Router();
 
@@ -1563,8 +1585,10 @@ const ACTIVE_REFERRAL_STATUS_FILTER = {
     { status: "CREDITED", dischargedAt: null },
   ],
 };
-router.post("/marketing-submit", requireAuth, requireRole("MARKETING"), uploadAttachment.single("attachment"), async (req, res) => {
+router.post("/marketing-submit", requireAuth, requireRole("MARKETING"), uploadLeadFiles, async (req, res) => {
   const body = req.body || {};
+  const cardFile = req.files?.attachment?.[0]; // the card photo
+  const extraFile = req.files?.extraAttachment?.[0]; // optional extra document, e.g. a prescription
   const patientName = (body.patientName || "").trim();
   const patientAge = Number(body.patientAge);
   const patientGender = body.patientGender;
@@ -1574,11 +1598,11 @@ router.post("/marketing-submit", requireAuth, requireRole("MARKETING"), uploadAt
   const idNumber = (body.idNumber || "").trim();
   const confirmDuplicate = body.confirmDuplicate === "true";
 
-  // multer has already written the upload to disk by the time we get here, so every rejection
-  // below deletes it — otherwise each blocked duplicate or invalid lead would leave an orphaned
-  // patient ID photo behind.
+  // multer has already written the uploads to disk by the time we get here, so every rejection
+  // below deletes them — otherwise each blocked duplicate or invalid lead would leave orphaned
+  // patient files behind.
   const reject = (status, payload) => {
-    if (req.file) fs.unlink(req.file.path, () => {});
+    for (const f of [cardFile, extraFile]) if (f) fs.unlink(f.path, () => {});
     return res.status(status).json(payload);
   };
 
@@ -1608,7 +1632,7 @@ router.post("/marketing-submit", requireAuth, requireRole("MARKETING"), uploadAt
   // For a government-scheme card or panel the photo is required — unless the person has said
   // "No photo available" (noPhoto), in which case the typed card number above stands in for it.
   // For anything else a photo stays optional.
-  if (photoRequired(cardType, panel) && !req.file && body.noPhoto !== "true") {
+  if (photoRequired(cardType, panel) && !cardFile && body.noPhoto !== "true") {
     return reject(400, { error: "Attach a photo of the card, or choose “No photo available” and enter the card number" });
   }
 
@@ -1682,7 +1706,8 @@ router.post("/marketing-submit", requireAuth, requireRole("MARKETING"), uploadAt
       idNumber: idNumber || null,
       forceType: body.forceType?.trim() || null,
       wardType: body.wardType?.trim() || null,
-      attachmentPath: req.file ? path.basename(req.file.path) : null,
+      attachmentPath: cardFile ? path.basename(cardFile.path) : null,
+      extraAttachmentPath: extraFile ? path.basename(extraFile.path) : null,
       status: needsCardCheck ? "CARD_REVIEW" : "PENDING",
     },
   });
@@ -1794,12 +1819,15 @@ router.post("/:id/verify-card", requireAuth, requireAccess(["ADMIN", "RECEPTION"
 // or a custom STAFF role with VIEW_REFERRALS/MANAGE_REFERRALS), or by the specific marketing
 // employee whose own leader this referral belongs to — never anyone else, since these are
 // often photos of ID documents.
-router.get("/:id/attachment", requireAuth, async (req, res) => {
+// Serves one of a lead's two files — the card photo (attachmentPath) or the extra document
+// (extraAttachmentPath) — to staff of the same hospital, or to the marketing person whose leader
+// the lead came through. Anyone else gets a 403.
+const serveAttachment = (field) => async (req, res) => {
   const referral = await prisma.referral.findUnique({
     where: { id: req.params.id },
     include: { doctor: { select: { hospitalId: true, marketingPersonId: true } } },
   });
-  if (!referral || !referral.attachmentPath) return res.status(404).json({ error: "No attachment for this referral" });
+  if (!referral || !referral[field]) return res.status(404).json({ error: "No attachment for this referral" });
 
   const staffPerms = req.user.permissions || [];
   const isStaffWithAccess =
@@ -1810,9 +1838,12 @@ router.get("/:id/attachment", requireAuth, async (req, res) => {
 
   if (!staffOk && !marketingOk) return res.status(403).json({ error: "Not authorized to view this attachment" });
 
-  const filePath = path.join(ATTACHMENTS_DIR, path.basename(referral.attachmentPath));
+  const filePath = path.join(ATTACHMENTS_DIR, path.basename(referral[field]));
   if (!fs.existsSync(filePath)) return res.status(404).json({ error: "Attachment file is missing" });
+  res.set("X-Content-Type-Options", "nosniff");
   res.sendFile(filePath);
-});
+};
+router.get("/:id/attachment", requireAuth, serveAttachment("attachmentPath"));
+router.get("/:id/attachment/extra", requireAuth, serveAttachment("extraAttachmentPath"));
 
 export default router;

@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Paperclip } from "lucide-react";
+import { Paperclip, FileText } from "lucide-react";
 import api from "../api/client";
 
 // Shown next to a patient's name in a referral list when a supporting image (ID/insurance
@@ -7,15 +7,17 @@ import api from "../api/client";
 // marketing employee submits a lead through their own portal. Fetches the file through the
 // authenticated attachment endpoint and opens it in a new tab; a plain <a href> can't carry
 // the bearer token these files are gated behind, so this can't just be a link.
-export default function AttachmentIcon({ referralId }) {
+// kind="extra" opens the optional second document (e.g. a prescription) instead of the card photo.
+export default function AttachmentIcon({ referralId, kind = "card" }) {
   const [loading, setLoading] = useState(false);
+  const extra = kind === "extra";
 
   async function handleClick(e) {
     e.stopPropagation();
     if (loading) return;
     setLoading(true);
     try {
-      const res = await api.get(`/referrals/${referralId}/attachment`, { responseType: "blob" });
+      const res = await api.get(`/referrals/${referralId}/attachment${extra ? "/extra" : ""}`, { responseType: "blob" });
       const url = URL.createObjectURL(res.data);
       window.open(url, "_blank", "noopener");
     } catch {
@@ -29,7 +31,7 @@ export default function AttachmentIcon({ referralId }) {
     <button
       type="button"
       onClick={handleClick}
-      title="View attached image"
+      title={extra ? "View attached document (e.g. prescription)" : "View attached image"}
       disabled={loading}
       style={{
         display: "inline-flex",
@@ -47,7 +49,7 @@ export default function AttachmentIcon({ referralId }) {
         verticalAlign: "middle",
       }}
     >
-      <Paperclip size={11} />
+      {extra ? <FileText size={11} /> : <Paperclip size={11} />}
     </button>
   );
 }
