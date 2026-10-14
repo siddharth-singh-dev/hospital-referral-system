@@ -183,10 +183,6 @@ export default function MarketingPersonDashboard() {
       setLeadError("Type the new leader's name.");
       return;
     }
-    if (!birthYear) {
-      setLeadError("Select the patient's birth year.");
-      return;
-    }
     if (!attachmentCardType) {
       setLeadError("Select what kind of card/document this is.");
       return;
@@ -202,6 +198,10 @@ export default function MarketingPersonDashboard() {
     }
     if (havePhoto && !attachmentFile) {
       setLeadError("Add the card photo, or tap “No photo available”.");
+      return;
+    }
+    if (!birthYear) {
+      setLeadError("Select the patient's birth year.");
       return;
     }
     setSubmittingLead(true);
@@ -583,33 +583,6 @@ export default function MarketingPersonDashboard() {
               </>
             )}
 
-            <label>Patient name</label>
-            <input value={leadName} onChange={(e) => setLeadName(e.target.value)} required />
-
-            <label>Birth year</label>
-            <select value={birthYear} onChange={(e) => setBirthYear(e.target.value)} required>
-              <option value="">— Select birth year —</option>
-              {BIRTH_YEARS.map((y) => <option key={y} value={y}>{y}</option>)}
-            </select>
-            {computedAge !== "" && (
-              <p style={{ fontSize: 12.5, color: "var(--ink-soft)", marginTop: -6, marginBottom: 10 }}>Age: {computedAge} yrs</p>
-            )}
-
-            <label>Patient gender</label>
-            <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
-              {["MALE", "FEMALE", "OTHER"].map((g) => (
-                <button
-                  key={g}
-                  type="button"
-                  className={leadGender === g ? "" : "secondary"}
-                  style={{ width: "auto", flex: 1, padding: "8px 0" }}
-                  onClick={() => setLeadGender(g)}
-                >
-                  {g.charAt(0) + g.slice(1).toLowerCase()}
-                </button>
-              ))}
-            </div>
-
             <label>Panel{attachmentCardType === "OTHER" ? " (optional)" : ""}</label>
             <select value={leadPanel} onChange={(e) => handlePanelChange(e.target.value)} required={attachmentCardType !== "OTHER"} disabled={panelLocked}>
               <option value="">{attachmentCardType === "OTHER" ? "— None —" : "Select panel…"}</option>
@@ -679,6 +652,33 @@ export default function MarketingPersonDashboard() {
             <p style={{ fontSize: 11.5, color: "var(--ink-soft)", marginTop: -2, marginBottom: 8 }}>
               Ayushman and Ayushman CAPF leads need reception to verify the card before they move to Pending — every other lead goes straight to Pending.
             </p>
+
+            <label>Patient name</label>
+            <input value={leadName} onChange={(e) => setLeadName(e.target.value)} required />
+
+            <label>Birth year</label>
+            <select value={birthYear} onChange={(e) => setBirthYear(e.target.value)} required>
+              <option value="">— Select birth year —</option>
+              {BIRTH_YEARS.map((y) => <option key={y} value={y}>{y}</option>)}
+            </select>
+            {computedAge !== "" && (
+              <p style={{ fontSize: 12.5, color: "var(--ink-soft)", marginTop: -6, marginBottom: 10 }}>Age: {computedAge} yrs</p>
+            )}
+
+            <label>Patient gender</label>
+            <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
+              {["MALE", "FEMALE", "OTHER"].map((g) => (
+                <button
+                  key={g}
+                  type="button"
+                  className={leadGender === g ? "" : "secondary"}
+                  style={{ width: "auto", flex: 1, padding: "8px 0" }}
+                  onClick={() => setLeadGender(g)}
+                >
+                  {g.charAt(0) + g.slice(1).toLowerCase()}
+                </button>
+              ))}
+            </div>
 
             <label>Note for reception (optional)</label>
             <textarea
