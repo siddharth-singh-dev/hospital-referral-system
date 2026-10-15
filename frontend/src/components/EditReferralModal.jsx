@@ -25,7 +25,7 @@ function toDatetimeLocal(isoString) {
 export default function EditReferralModal({ referral, onClose, onSaved }) {
   const [patientName, setPatientName] = useState(referral.patientName || "");
   const [patientAge, setPatientAge] = useState(referral.patientAge != null ? String(referral.patientAge) : "");
-  const [patientGender, setPatientGender] = useState(referral.patientGender || "MALE");
+  const [patientGender, setPatientGender] = useState(referral.patientGender || ""); // may be blank on a quick lead — don't guess
   const [patientPhone, setPatientPhone] = useState(referral.patientPhone || "");
   const [fileNumber, setFileNumber] = useState(referral.fileNumber || "");
   const [visitType, setVisitType] = useState(referral.visitType || "");
@@ -46,8 +46,9 @@ export default function EditReferralModal({ referral, onClose, onSaved }) {
     try {
       const payload = {
         patientName: patientName.trim(),
-        patientAge: Number(patientAge),
-        patientGender,
+        // a blank age/gender (a quick lead) is simply left as it is, never saved as 0 / Male
+        ...(patientAge !== "" ? { patientAge: Number(patientAge) } : {}),
+        ...(patientGender ? { patientGender } : {}),
         patientPhone: patientPhone.trim() || null,
         fileNumber: fileNumber.trim() || null,
         visitType: visitType || null,
@@ -83,7 +84,7 @@ export default function EditReferralModal({ referral, onClose, onSaved }) {
         <input value={patientName} onChange={(e) => setPatientName(e.target.value)} required />
 
         <label>Patient age</label>
-        <input type="number" min="0" max="130" value={patientAge} onChange={(e) => setPatientAge(e.target.value)} required />
+        <input type="number" min="0" max="130" value={patientAge} onChange={(e) => setPatientAge(e.target.value)} />
 
         <label>Patient gender</label>
         <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
@@ -93,7 +94,7 @@ export default function EditReferralModal({ referral, onClose, onSaved }) {
               type="button"
               className={patientGender === g ? "" : "secondary"}
               style={{ width: "auto", flex: 1, padding: "8px 0" }}
-              onClick={() => setPatientGender(g)}
+              onClick={() => setPatientGender(patientGender === g ? "" : g)}
             >
               {g.charAt(0) + g.slice(1).toLowerCase()}
             </button>

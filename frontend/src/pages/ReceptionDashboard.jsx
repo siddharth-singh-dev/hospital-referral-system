@@ -10,6 +10,7 @@ import AddPatientModal from "../components/AddPatientModal";
 import EditReferralModal from "../components/EditReferralModal";
 import AttachmentIcon from "../components/AttachmentIcon";
 import LeadNote from "../components/LeadNote";
+import MissingDetails from "../components/MissingDetails";
 import NotificationBell from "../components/NotificationBell";
 import EmptyState from "../components/EmptyState";
 import { PANEL_OPTIONS } from "../utils/panels";
@@ -294,11 +295,12 @@ export default function ReceptionDashboard() {
                     <td>
                       <div className="cell-primary">{r.patientName}{r.attachmentPath && <AttachmentIcon referralId={r.id} />}{r.extraAttachmentPath && <AttachmentIcon referralId={r.id} kind="extra" />}</div>
                       <div className="cell-secondary">
-                        {r.patientAge}{r.patientGender ? `${r.patientGender.charAt(0)}` : ""}
+                        {r.patientAge ?? "—"}{r.patientGender ? `${r.patientGender.charAt(0)}` : ""}
                         {r.fileNumber ? ` · ${r.fileNumber}` : ""}
                         {r.patientPhone ? ` · ${r.patientPhone}` : ""}
                       </div>
                       {r.leadNote && <LeadNote text={r.leadNote} />}
+                        <MissingDetails referral={r} />
                     </td>
                     <td>
                       <div className="cell-primary">{r.doctor?.name}{r.doctor?.clinicName ? ` (${r.doctor.clinicName})` : ""}</div>

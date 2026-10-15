@@ -203,7 +203,7 @@ export default function DoctorDashboard() {
                 {filteredReferrals.slice((page - 1) * HISTORY_PAGE_SIZE, page * HISTORY_PAGE_SIZE).map((r) => (
                   <tr key={r.id}>
                     <td>{r.patientName}</td>
-                    <td>{r.patientAge}</td>
+                    <td>{r.patientAge ?? "—"}</td>
                     <td>{r.patientGender ? r.patientGender.charAt(0) + r.patientGender.slice(1).toLowerCase() : "—"}</td>
                     <td><span className={`badge ${r.status}`}>{STATUS_LABELS[r.status] || r.status}</span></td>
                     <td>{r.transaction ? `${Number(r.transaction.amount).toFixed(2)} pts` : "—"}</td>

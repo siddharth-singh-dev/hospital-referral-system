@@ -10,6 +10,7 @@ import EditReferralModal from "../components/EditReferralModal";
 import DateRangePicker from "../components/DateRangePicker";
 import AttachmentIcon from "../components/AttachmentIcon";
 import LeadNote from "../components/LeadNote";
+import MissingDetails from "../components/MissingDetails";
 import NotificationBell from "../components/NotificationBell";
 import { PANEL_OPTIONS } from "../utils/panels";
 import { statusLabel } from "../utils/referralStatus";
@@ -365,9 +366,9 @@ export default function StaffPortal() {
                 <tbody>
                   {referrals.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE).map((r) => (
                     <tr key={r.id} style={r.status === "CREDITED" && r.dischargedAt ? { background: "#fef3c7" } : undefined}>
-                      <td>{r.patientName}{r.attachmentPath && <AttachmentIcon referralId={r.id} />}{r.extraAttachmentPath && <AttachmentIcon referralId={r.id} kind="extra" />}{r.leadNote && <LeadNote text={r.leadNote} />}</td>
+                      <td>{r.patientName}{r.attachmentPath && <AttachmentIcon referralId={r.id} />}{r.extraAttachmentPath && <AttachmentIcon referralId={r.id} kind="extra" />}{r.leadNote && <LeadNote text={r.leadNote} />}<MissingDetails referral={r} /></td>
                       <td>{r.fileNumber || "—"}</td>
-                      <td>{r.patientAge}</td>
+                      <td>{r.patientAge ?? "—"}</td>
                       <td>{r.patientGender ? r.patientGender.charAt(0) + r.patientGender.slice(1).toLowerCase() : "—"}</td>
                       <td>{r.doctor?.name}{r.doctor?.clinicName ? ` (${r.doctor.clinicName})` : ""}</td>
                       <td>{r.doctor?.marketingPerson?.name || "—"}</td>

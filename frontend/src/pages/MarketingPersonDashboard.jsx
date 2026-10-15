@@ -6,7 +6,7 @@ import { Lock, TrendingUp, LogOut, UserPlus, Paperclip, ChevronRight, X, Refresh
 import Modal from "../components/Modal";
 import CardScanUpload, { CARD_TYPES } from "../components/CardScanUpload";
 import ExtraAttachmentPicker from "../components/ExtraAttachmentPicker";
-import { pairError, photoRequiredFor, panelOptionsForCard, cardOptionsForPanel } from "../utils/cardPanelRules";
+import { pairError, panelOptionsForCard, cardOptionsForPanel } from "../utils/cardPanelRules";
 import { PANEL_OPTIONS } from "../utils/panels";
 
 const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:4000/api";
@@ -14,7 +14,6 @@ const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:4000/api";
 const CURRENT_YEAR = new Date().getFullYear();
 // Newborn (this year) down to 110 years old — covers realistic patient ages without asking
 // for a full date of birth, which the hospital doesn't otherwise collect for a quick lead.
-const BIRTH_YEARS = Array.from({ length: 111 }, (_, i) => CURRENT_YEAR - i);
 
 import { STAGE_META, LEAD_FILTERS } from "../utils/leadStages";
 
@@ -60,13 +59,13 @@ export default function MarketingPersonDashboard() {
   const [leaderChoice, setLeaderChoice] = useState(""); // an existing leader's id, or "" / "__new__"
   const [newLeaderName, setNewLeaderName] = useState("");
   const [leadName, setLeadName] = useState("");
-  const [birthYear, setBirthYear] = useState("");
-  const [leadGender, setLeadGender] = useState("MALE");
+  const [leadAge, setLeadAge] = useState(""); // optional
+  const [leadGender, setLeadGender] = useState(""); // optional
   const [leadPanel, setLeadPanel] = useState("");
   const [leadNote, setLeadNote] = useState(""); // optional message for reception, shown on the lead
   const [extraFile, setExtraFile] = useState(null); // optional extra document (e.g. a prescription) sent along with the card photo
   const [idNumber, setIdNumber] = useState("");
-  const [havePhoto, setHavePhoto] = useState(true); // false = "no photo available" — declare type/ID manually instead
+  const [showCardSection, setShowCardSection] = useState(false); // the optional card block starts collapsed — a quick lead is just leader + name
   const [attachmentFile, setAttachmentFile] = useState(null);
   const [attachmentCardType, setAttachmentCardType] = useState("");
   const [lastEdited, setLastEdited] = useState(""); // "panel" | "card": whichever the person set last — the OTHER one is the one that gets narrowed/locked to match
@@ -75,7 +74,6 @@ export default function MarketingPersonDashboard() {
   const [leadSuccess, setLeadSuccess] = useState("");
   const [pendingDuplicateWarning, setPendingDuplicateWarning] = useState(""); // set once the backend warns of a possible (non-card) duplicate; submitting again proceeds past it
 
-  const computedAge = birthYear ? CURRENT_YEAR - Number(birthYear) : "";
 
   // Panel and card type are tied together (see utils/cardPanelRules.js): whichever is picked
   // first narrows — and for the government schemes, locks — the other.
@@ -84,7 +82,8 @@ export default function MarketingPersonDashboard() {
   const cardChoices = lastEdited === "panel" ? cardOptionsForPanel(leadPanel, allCardValues) : allCardValues;
   const panelLocked = lastEdited === "card" && panelChoices.length === 1;
   const cardLocked = lastEdited === "panel" && cardChoices.length === 1;
-  const photoNeeded = photoRequiredFor(attachmentCardType, leadPanel);
+  // The card block opens on demand, and stays open once anything is in it (including a card type the Panel just locked in).
+  const cardOpen = showCardSection || Boolean(attachmentCardType || idNumber || attachmentFile);
 
   function handleCardTypeChange(c) {
     setAttachmentCardType(c);
@@ -108,13 +107,13 @@ export default function MarketingPersonDashboard() {
     setLeaderChoice("");
     setNewLeaderName("");
     setLeadName("");
-    setBirthYear("");
-    setLeadGender("MALE");
+    setLeadAge("");
+    setLeadGender("");
     setLeadPanel("");
     setLeadNote("");
     setExtraFile(null);
     setIdNumber("");
-    setHavePhoto(true);
+    setShowCardSection(false);
     setAttachmentFile(null);
     setAttachmentCardType("");
     setLastEdited("");
@@ -161,9 +160,9 @@ export default function MarketingPersonDashboard() {
       // rather than skipping the fallback just because *a* dob string was present.
       const yearFromDob = ocrResult.dob?.match(/^(\d{4})-/)?.[1] || ocrResult.dob?.match(/(\d{4})\s*$/)?.[1];
       if (yearFromDob) {
-        setBirthYear(yearFromDob);
+        setLeadAge(String(CURRENT_YEAR - Number(yearFromDob)));
       } else if (ocrResult.patientAge) {
-        setBirthYear(String(CURRENT_YEAR - ocrResult.patientAge));
+        setLeadAge(String(ocrResult.patientAge));
       }
       if (ocrResult.patientGender) setLeadGender(ocrResult.patientGender);
       // Fill the panel from the card only if none is chosen yet (or to upgrade CAPF to AYUSHMAN CAPF
@@ -186,8 +185,12 @@ export default function MarketingPersonDashboard() {
       setLeadError("Type the new leader's name.");
       return;
     }
-    if (!attachmentCardType) {
-      setLeadError("Select what kind of card/document this is.");
+    if (!leadName.trim()) {
+      setLeadError("Enter the patient's name.");
+      return;
+    }
+    if (leadAge !== "" && (!Number.isInteger(Number(leadAge)) || Number(leadAge) < 0 || Number(leadAge) > 130)) {
+      setLeadError("Age must be a whole number between 0 and 130.");
       return;
     }
     const mismatch = pairError(attachmentCardType, leadPanel);
@@ -195,32 +198,19 @@ export default function MarketingPersonDashboard() {
       setLeadError(`${mismatch}.`);
       return;
     }
-    if (attachmentCardType !== "OTHER" && !idNumber.trim()) {
-      setLeadError("Enter the card/ID number (or re-scan if it wasn't read correctly).");
-      return;
-    }
-    if (havePhoto && !attachmentFile) {
-      setLeadError("Add the card photo, or tap “No photo available”.");
-      return;
-    }
-    if (!birthYear) {
-      setLeadError("Select the patient's birth year.");
-      return;
-    }
     setSubmittingLead(true);
     try {
       const formData = new FormData();
       formData.append("patientName", leadName.trim());
-      formData.append("patientAge", computedAge);
-      formData.append("patientGender", leadGender);
+      if (leadAge !== "") formData.append("patientAge", leadAge);
+      if (leadGender) formData.append("patientGender", leadGender);
       if (leadPanel) formData.append("panel", leadPanel);
-      if (!havePhoto) formData.append("noPhoto", "true"); // the person said there is no photo — the typed card number stands in
       if (leadNote.trim()) formData.append("leadNote", leadNote.trim());
       if (extraFile) formData.append("extraAttachment", extraFile);
       if (leaderChoice === "__new__") formData.append("newLeaderName", newLeaderName.trim());
       else formData.append("leaderId", leaderChoice);
       if (attachmentFile) formData.append("attachment", attachmentFile);
-      formData.append("cardType", attachmentCardType);
+      if (attachmentCardType) formData.append("cardType", attachmentCardType);
       if (idNumber.trim()) formData.append("idNumber", idNumber.trim());
       if (pendingDuplicateWarning) formData.append("confirmDuplicate", "true");
 
@@ -235,7 +225,7 @@ export default function MarketingPersonDashboard() {
       loadMyLeads(token);
     } catch (err) {
       if (err.response?.status === 409 && err.response?.data?.possibleDuplicate) {
-        // Fuzzy (name + birth year) match, not a hard block — let them decide.
+        // Fuzzy (name + age) match, not a hard block — let them decide.
         setPendingDuplicateWarning(err.response.data.error);
       } else {
         setLeadError(err.response?.data?.error || "Failed to submit this lead.");
@@ -572,6 +562,9 @@ export default function MarketingPersonDashboard() {
       {showLeadForm && (
         <Modal title="Submit a lead" onClose={() => { if (!submittingLead) { resetLeadForm(); setLeadError(""); setShowLeadForm(false); } }} width={480}>
           <form onSubmit={handleSubmitLead}>
+            <p style={{ fontSize: 13, color: "var(--ink-soft)", margin: "0 0 12px" }}>
+              Only the leader and the patient's name are required — add whatever else you know. Reception can fill in the rest.
+            </p>
             <label>Which leader passed you this lead?</label>
             <select value={leaderChoice} onChange={(e) => setLeaderChoice(e.target.value)} required>
               <option value="">— Select a leader —</option>
@@ -587,30 +580,23 @@ export default function MarketingPersonDashboard() {
               </>
             )}
 
-            <label>Panel{attachmentCardType === "OTHER" ? " (optional)" : ""}</label>
-            <select value={leadPanel} onChange={(e) => handlePanelChange(e.target.value)} required={attachmentCardType !== "OTHER"} disabled={panelLocked}>
-              <option value="">{attachmentCardType === "OTHER" ? "— None —" : "Select panel…"}</option>
+            <label>Panel (optional)</label>
+            <select value={leadPanel} onChange={(e) => handlePanelChange(e.target.value)} disabled={panelLocked}>
+              <option value="">— None —</option>
               {panelChoices.map((p) => <option key={p} value={p}>{p}</option>)}
             </select>
             {panelLocked && <p style={{ fontSize: 11.5, color: "var(--ink-soft)", marginTop: -10, marginBottom: 10 }}>Set by the card type — change the card type to change this.</p>}
 
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 4 }}>
-              <label style={{ margin: 0 }}>{havePhoto ? "Card / document photo" : "Card / document details"}</label>
-              <button
-                type="button"
-                className="secondary"
-                style={{ width: "auto", padding: "3px 10px", fontSize: 12 }}
-                onClick={() => {
-                  setHavePhoto(!havePhoto);
-                  setAttachmentFile(null);
-                }}
-              >
-                {havePhoto ? "No photo available" : "I have a photo"}
-              </button>
-            </div>
-
-            {havePhoto ? (
+            {cardOpen ? (
               <>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 4 }}>
+                  <label style={{ margin: 0 }}>Card / document (optional)</label>
+                  {!attachmentCardType && !idNumber && !attachmentFile && (
+                    <button type="button" className="secondary" style={{ width: "auto", padding: "3px 10px", fontSize: 12 }} onClick={() => setShowCardSection(false)}>
+                      Hide
+                    </button>
+                  )}
+                </div>
                 <CardScanUpload
                   authToken={token}
                   onExtracted={handleCardScanned}
@@ -633,43 +619,37 @@ export default function MarketingPersonDashboard() {
                     </button>
                   </p>
                 )}
+                {attachmentCardType && attachmentCardType !== "OTHER" && (
+                  <>
+                    <label>Card / ID number (optional)</label>
+                    <input value={idNumber} onChange={(e) => { setIdNumber(e.target.value); setPendingDuplicateWarning(""); }} placeholder="As printed on the card" />
+                  </>
+                )}
+                <p style={{ fontSize: 11.5, color: "var(--ink-soft)", marginTop: -2, marginBottom: 8 }}>
+                  An Ayushman or Ayushman CAPF lead with a card number or photo goes to reception for a card check; every other lead goes straight to Pending.
+                </p>
               </>
             ) : (
-              <>
-                <label>What kind of card is this?</label>
-                <select value={attachmentCardType} onChange={(e) => handleCardTypeChange(e.target.value)} required disabled={cardLocked}>
-                  <option value="">— Select —</option>
-                  {CARD_TYPES.filter((c) => cardChoices.includes(c.value)).map((c) => <option key={c.value} value={c.value}>{c.label}</option>)}
-                </select>
-                {cardLocked && <p style={{ fontSize: 11.5, color: "var(--ink-soft)", marginTop: -10, marginBottom: 8 }}>Set by the panel — change the panel to change this.</p>}
-                {photoNeeded && <p style={{ fontSize: 11.5, color: "var(--amber-700, #b45309)", marginTop: -6, marginBottom: 8 }}>No photo: reception will check this card by its number only.</p>}
-              </>
+              <button type="button" className="secondary" style={{ marginTop: 4, marginBottom: 12 }} onClick={() => setShowCardSection(true)}>
+                + Add card details (optional)
+              </button>
             )}
-
-            {attachmentCardType && attachmentCardType !== "OTHER" && (
-              <>
-                <label>Card / ID number</label>
-                <input value={idNumber} onChange={(e) => { setIdNumber(e.target.value); setPendingDuplicateWarning(""); }} placeholder="As printed on the card" required />
-              </>
-            )}
-
-            <p style={{ fontSize: 11.5, color: "var(--ink-soft)", marginTop: -2, marginBottom: 8 }}>
-              Ayushman and Ayushman CAPF leads need reception to verify the card before they move to Pending — every other lead goes straight to Pending.
-            </p>
 
             <label>Patient name</label>
             <input value={leadName} onChange={(e) => setLeadName(e.target.value)} required />
 
-            <label>Birth year</label>
-            <select value={birthYear} onChange={(e) => setBirthYear(e.target.value)} required>
-              <option value="">— Select birth year —</option>
-              {BIRTH_YEARS.map((y) => <option key={y} value={y}>{y}</option>)}
-            </select>
-            {computedAge !== "" && (
-              <p style={{ fontSize: 12.5, color: "var(--ink-soft)", marginTop: -6, marginBottom: 10 }}>Age: {computedAge} yrs</p>
-            )}
+            <label>Age (optional)</label>
+            <input
+              type="number"
+              inputMode="numeric"
+              min="0"
+              max="130"
+              value={leadAge}
+              onChange={(e) => { setLeadAge(e.target.value); setPendingDuplicateWarning(""); }}
+              placeholder="e.g. 55"
+            />
 
-            <label>Patient gender</label>
+            <label>Patient gender (optional)</label>
             <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
               {["MALE", "FEMALE", "OTHER"].map((g) => (
                 <button
@@ -677,7 +657,7 @@ export default function MarketingPersonDashboard() {
                   type="button"
                   className={leadGender === g ? "" : "secondary"}
                   style={{ width: "auto", flex: 1, padding: "8px 0" }}
-                  onClick={() => setLeadGender(g)}
+                  onClick={() => setLeadGender(leadGender === g ? "" : g)}
                 >
                   {g.charAt(0) + g.slice(1).toLowerCase()}
                 </button>

@@ -211,7 +211,7 @@ model Referral {
   doctorId        String
 
   patientName     String
-  patientAge      Int
+  patientAge      Int?  // optional — a quick lead from the marketing portal can arrive with just a name
   patientPhone    String?
   patientGender   PatientGender?
 

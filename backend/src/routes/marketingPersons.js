@@ -315,10 +315,14 @@ function leadStage(r) {
   switch (r.status) {
     case "CARD_REVIEW":
       return { stage: "CARD_REVIEW", label: "Card under review", note: "Waiting for reception" };
-    case "PENDING":
-      return needsCardReview(r.idType, r.panel)
-        ? { stage: "CARD_ACTIVE", label: "Card active", note: "Awaiting arrival" }
-        : { stage: "PENDING", label: "Awaiting arrival", note: null };
+    case "PENDING": {
+      if (needsCardReview(r.idType, r.panel, Boolean(r.idNumber || r.attachmentPath))) {
+        return { stage: "CARD_ACTIVE", label: "Card active", note: "Awaiting arrival" };
+      }
+      // An Ayushman lead sent without a card number or photo was never card-checked
+      const unchecked = needsCardReview(r.idType, r.panel, true);
+      return { stage: "PENDING", label: "Awaiting arrival", note: unchecked ? "No card details yet" : null };
+    }
     case "CREDITED":
       if (r.dischargedAt) return { stage: "DISCHARGED", label: "Discharged", note: r.visitType || null };
       return r.visitType === "OPD"
@@ -351,6 +355,8 @@ router.get("/public/me/leads", requireAuth, requireRole("MARKETING"), async (req
       id: true,
       patientName: true,
       idType: true,
+      idNumber: true,
+      attachmentPath: true,
       panel: true,
       status: true,
       rejectedReason: true,
@@ -402,7 +408,7 @@ router.get("/team/overview", ...teamHeadAccess, async (req, res) => {
   const referrals = personByDoctor.size
     ? await prisma.referral.findMany({
         where: { doctorId: { in: [...personByDoctor.keys()] } },
-        select: { doctorId: true, status: true, idType: true, panel: true, visitType: true, dischargedAt: true, rejectedReason: true, createdAt: true },
+        select: { doctorId: true, status: true, idType: true, idNumber: true, attachmentPath: true, panel: true, visitType: true, dischargedAt: true, rejectedReason: true, createdAt: true },
       })
     : [];
 
@@ -454,7 +460,7 @@ router.get("/team/leads", ...teamHeadAccess, async (req, res) => {
     orderBy: { createdAt: "desc" },
     take: 500,
     select: {
-      id: true, patientName: true, idType: true, panel: true, status: true, rejectedReason: true,
+      id: true, patientName: true, idType: true, idNumber: true, attachmentPath: true, panel: true, status: true, rejectedReason: true,
       visitType: true, dischargedAt: true, createdAt: true,
       doctor: { select: { name: true, marketingPerson: { select: { id: true, name: true } } } },
     },

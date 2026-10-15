@@ -15,7 +15,7 @@ import { formatDate, formatDateTime } from "../utils/formatDate.js";
 import { logActivity, diffFields, ACTIONS } from "../utils/activityLog.js";
 import { notify, NOTIFICATION_TYPES } from "../utils/notifications.js";
 import { normalizePanel } from "../utils/panels.js";
-import { checkCardPanelPair, needsCardReview, photoRequired } from "../utils/cardPanelRules.js";
+import { checkCardPanelPair, needsCardReview } from "../utils/cardPanelRules.js";
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024 } });
 
@@ -1101,7 +1101,7 @@ router.get("/export/pdf", requireAuth, requireAccess(["ADMIN"], ["EXPORT_REPORTS
   y = drawColumnHeader(y);
 
   referrals.forEach((r, i) => {
-    const ageGender = `${r.patientAge}${r.patientGender ? "/" + r.patientGender.charAt(0) : ""}`;
+    const ageGender = `${r.patientAge ?? "—"}${r.patientGender ? "/" + r.patientGender.charAt(0) : ""}`;
     const credit = r.transaction ? `${Number(r.transaction.amount).toFixed(2)} pts` : "-";
     const payout = r.transaction ? (r.transaction.redeemed ? "Paid" : "Unpaid") : "-";
     // "Admission" is arrivedAt (set when reception confirms/credits the patient — see the
@@ -1590,8 +1590,9 @@ router.post("/marketing-submit", requireAuth, requireRole("MARKETING"), uploadLe
   const cardFile = req.files?.attachment?.[0]; // the card photo
   const extraFile = req.files?.extraAttachment?.[0]; // optional extra document, e.g. a prescription
   const patientName = (body.patientName || "").trim();
-  const patientAge = Number(body.patientAge);
-  const patientGender = body.patientGender;
+  const ageText = String(body.patientAge ?? "").trim();
+  const patientAge = ageText === "" ? null : Number(ageText); // optional
+  const patientGender = String(body.patientGender || "").trim() || null; // optional
   const leaderId = (body.leaderId || "").trim();
   const newLeaderName = (body.newLeaderName || "").trim();
   const cardType = (body.cardType || "").trim().toUpperCase();
@@ -1606,71 +1607,63 @@ router.post("/marketing-submit", requireAuth, requireRole("MARKETING"), uploadLe
     return res.status(status).json(payload);
   };
 
+  // Only the leader and the patient's name are required. A lead goes in with whatever the marketing
+  // person knows at the time (often a name and an age, or a name and a panel, passed on by phone)
+  // and reception fills in the rest at the desk. Anything that IS supplied is still checked.
   if (!patientName) return reject(400, { error: "Patient name is required" });
-  if (!Number.isInteger(patientAge) || patientAge < 0 || patientAge > 130) {
-    return reject(400, { error: "A valid patient age is required" }); // 0 is valid — a newborn is genuinely 0 years old
+  if (patientAge !== null && (!Number.isInteger(patientAge) || patientAge < 0 || patientAge > 130)) {
+    return reject(400, { error: "Age must be a whole number between 0 and 130" }); // 0 is valid — a newborn
   }
-  if (!["MALE", "FEMALE", "OTHER"].includes(patientGender)) {
-    return reject(400, { error: "Patient gender is required" });
+  if (patientGender && !["MALE", "FEMALE", "OTHER"].includes(patientGender)) {
+    return reject(400, { error: "Patient gender must be Male, Female or Other" });
   }
-  const panel = normalizePanel(body.panel);
+  const panel = normalizePanel(body.panel); // null when none was given
   const leadNote = (body.leadNote || "").trim();
   if (leadNote.length > 300) return reject(400, { error: "Keep the note to 300 characters or fewer" });
   if (!leaderId && !newLeaderName) {
     return reject(400, { error: "Tell us which leader passed you this lead — pick one from your list or type a new name" });
   }
-  if (!CARD_TYPES_FOR_SUBMIT.includes(cardType)) {
-    return reject(400, { error: `Select what kind of card/document this is (${CARD_TYPES_FOR_SUBMIT.join(", ")})` });
+  if (cardType && !CARD_TYPES_FOR_SUBMIT.includes(cardType)) {
+    return reject(400, { error: `That card type isn't recognised (${CARD_TYPES_FOR_SUBMIT.join(", ")})` });
   }
-  // The card type and the panel have to agree (see utils/cardPanelRules.js). The panel is
-  // required for every card type except "Other".
+  // If both a card type and a panel were given they have to agree (see utils/cardPanelRules.js).
   const pairError = checkCardPanelPair(cardType, panel);
   if (pairError) return reject(400, { error: pairError });
-  if (cardType !== "OTHER" && !idNumber) {
-    return reject(400, { error: "The card/ID number is required for this card type" });
-  }
-  // For a government-scheme card or panel the photo is required — unless the person has said
-  // "No photo available" (noPhoto), in which case the typed card number above stands in for it.
-  // For anything else a photo stays optional.
-  if (photoRequired(cardType, panel) && !cardFile && body.noPhoto !== "true") {
-    return reject(400, { error: "Attach a photo of the card, or choose “No photo available” and enter the card number" });
-  }
 
-  // Hard block: an existing active lead with the same (usable) ID number, anywhere in the
-  // hospital, regardless of who submitted it.
-  let existingActiveMatch = null;
-  if (idNumber) {
-    const normalizedId = normalizeIdNumber(idNumber);
-    if (normalizedId.length >= 6 && !isMaskedAadhaar(idNumber)) {
-      const candidates = await prisma.referral.findMany({
-        where: { doctor: { hospitalId: req.user.hospitalId }, idNumber: { not: null }, ...ACTIVE_REFERRAL_STATUS_FILTER },
+  // Duplicate protection. With a usable card/ID number: a hard block on any active lead that has
+  // the same number, anywhere in the hospital, whoever submitted it. Without one — a quick lead, or
+  // a scanned Aadhaar whose masked number is too ambiguous to block on — a softer warning on an
+  // exact name match instead (and, when both leads have an age, an age within a year), which the
+  // person can confirm past; the client resubmits with confirmDuplicate=true.
+  const normalizedId = idNumber ? normalizeIdNumber(idNumber) : "";
+  const hasUsableId = normalizedId.length >= 6 && !isMaskedAadhaar(idNumber);
+  if (hasUsableId) {
+    const candidates = await prisma.referral.findMany({
+      where: { doctor: { hospitalId: req.user.hospitalId }, idNumber: { not: null }, ...ACTIVE_REFERRAL_STATUS_FILTER },
+    });
+    const existingActiveMatch = candidates.find((c) => normalizeIdNumber(c.idNumber) === normalizedId);
+    if (existingActiveMatch) {
+      return reject(409, {
+        error: `This card is already on an active lead for ${existingActiveMatch.patientName} (${existingActiveMatch.status.replace("_", " ").toLowerCase()}). It can't be submitted again until that one is discharged or rejected.`,
       });
-      existingActiveMatch = candidates.find((c) => normalizeIdNumber(c.idNumber) === normalizedId);
-      if (existingActiveMatch) {
-        return reject(409, {
-          error: `This card is already on an active lead for ${existingActiveMatch.patientName} (${existingActiveMatch.status.replace("_", " ").toLowerCase()}). It can't be submitted again until that one is discharged or rejected.`,
-        });
-      }
     }
-  } else {
-    // No ID number to go on (an OTHER-type submission) — fall back to name + birth year, a
-    // fuzzier signal, so this is a warning rather than a block, and only fires once (the
-    // client resubmits with confirmDuplicate=true to proceed past it).
-    if (!confirmDuplicate) {
-      const normalizedName = patientName.trim().toUpperCase().replace(/\s+/g, " ");
-      const candidates = await prisma.referral.findMany({
-        where: { doctor: { hospitalId: req.user.hospitalId }, ...ACTIVE_REFERRAL_STATUS_FILTER },
-        select: { patientName: true, patientAge: true, status: true },
+  } else if (!confirmDuplicate) {
+    const normalizedName = patientName.trim().toUpperCase().replace(/\s+/g, " ");
+    const candidates = await prisma.referral.findMany({
+      where: { doctor: { hospitalId: req.user.hospitalId }, ...ACTIVE_REFERRAL_STATUS_FILTER },
+      select: { patientName: true, patientAge: true, status: true },
+    });
+    const possibleMatch = candidates.find(
+      (c) =>
+        c.patientName.trim().toUpperCase().replace(/\s+/g, " ") === normalizedName &&
+        (patientAge === null || c.patientAge === null || Math.abs(c.patientAge - patientAge) <= 1)
+    );
+    if (possibleMatch) {
+      const ageNote = possibleMatch.patientAge === null ? "" : ` (age ~${possibleMatch.patientAge})`;
+      return reject(409, {
+        possibleDuplicate: true,
+        error: `A lead for ${possibleMatch.patientName}${ageNote} already looks active (${possibleMatch.status.replace("_", " ").toLowerCase()}). Submit anyway if this is genuinely a different person?`,
       });
-      const possibleMatch = candidates.find(
-        (c) => c.patientName.trim().toUpperCase().replace(/\s+/g, " ") === normalizedName && Math.abs(c.patientAge - patientAge) <= 1
-      );
-      if (possibleMatch) {
-        return reject(409, {
-          possibleDuplicate: true,
-          error: `A lead for ${possibleMatch.patientName} (age ~${possibleMatch.patientAge}) already looks active (${possibleMatch.status.replace("_", " ").toLowerCase()}). Submit anyway if this is genuinely a different person?`,
-        });
-      }
     }
   }
 
@@ -1690,8 +1683,9 @@ router.post("/marketing-submit", requireAuth, requireRole("MARKETING"), uploadLe
   // AYUSHMAN CAPF) needs reception to verify the card is still active before it can move on
   // (scheme status commonly lapses and isn't something OCR or this system can check). Every
   // other lead — CGHS/ECHS/CAPF/Aadhaar/Other, including cash patients sent with just a
-  // prescription — goes straight to Pending, with any attached photo carried on the referral.
-  const needsCardCheck = needsCardReview(cardType, panel);
+  // prescription — goes straight to Pending, with any attached photo carried on the referral. An
+  // Ayushman lead with no card number or photo yet has nothing to verify, so it waits in Pending too.
+  const needsCardCheck = needsCardReview(cardType, panel, Boolean(idNumber) || Boolean(cardFile));
 
   const referral = await prisma.referral.create({
     data: {
@@ -1702,7 +1696,7 @@ router.post("/marketing-submit", requireAuth, requireRole("MARKETING"), uploadLe
       patientPhone: body.patientPhone?.trim() || null,
       panel,
       leadNote: leadNote || null,
-      idType: cardType,
+      idType: cardType || null,
       idNumber: idNumber || null,
       forceType: body.forceType?.trim() || null,
       wardType: body.wardType?.trim() || null,
