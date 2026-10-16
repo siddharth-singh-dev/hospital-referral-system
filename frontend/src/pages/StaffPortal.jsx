@@ -11,6 +11,7 @@ import DateRangePicker from "../components/DateRangePicker";
 import AttachmentIcon from "../components/AttachmentIcon";
 import LeadNote from "../components/LeadNote";
 import MissingDetails from "../components/MissingDetails";
+import AdmissionFilter from "../components/AdmissionFilter";
 import NotificationBell from "../components/NotificationBell";
 import { PANEL_OPTIONS } from "../utils/panels";
 import { statusLabel } from "../utils/referralStatus";
@@ -40,6 +41,7 @@ export default function StaffPortal() {
   const [search, setSearch] = useState("");
   const [doctorId, setDoctorId] = useState("");
   const [payoutFilter, setPayoutFilter] = useState(""); // "" | "unpaid" | "paid" — only shown/used on the Credited tab
+  const [dischargeStatus, setDischargeStatus] = useState(""); // "" | "admitted" | "discharged" — only shown/used on the Credited tab
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
   const [loading, setLoading] = useState(false);
@@ -66,6 +68,7 @@ export default function StaffPortal() {
           to: dateTo || undefined,
           unpaidOnly: payoutFilter === "unpaid" || undefined,
           paidOnly: payoutFilter === "paid" || undefined,
+          dischargeStatus: dischargeStatus || undefined,
           page: 1,
           pageSize: 100,
         },
@@ -96,8 +99,11 @@ export default function StaffPortal() {
   }
 
   useEffect(() => { loadDoctors(); }, []);
-  useEffect(() => { load(); }, [tab, doctorId, dateFrom, dateTo, payoutFilter]);
-  useEffect(() => { setPage(1); }, [tab, doctorId, dateFrom, dateTo, payoutFilter, referrals.length]);
+  useEffect(() => { load(); }, [tab, doctorId, dateFrom, dateTo, payoutFilter, dischargeStatus]);
+  useEffect(() => { setPage(1); }, [tab, doctorId, dateFrom, dateTo, payoutFilter, dischargeStatus, referrals.length]);
+  // These only exist on the Admitted (Credited) tab. Left switched on, they'd silently hide every row on the other tabs
+  // (a Pending lead has no credit and no discharge date), with the controls out of sight.
+  useEffect(() => { if (tab !== "CREDITED") { setDischargeStatus(""); setPayoutFilter(""); } }, [tab]);
   useEffect(() => {
     loadStatusCounts();
     const interval = setInterval(loadStatusCounts, 30000);
@@ -214,6 +220,7 @@ export default function StaffPortal() {
           to: dateTo || undefined,
           unpaidOnly: payoutFilter === "unpaid" || undefined,
           paidOnly: payoutFilter === "paid" || undefined,
+          dischargeStatus: dischargeStatus || undefined,
         },
         responseType: "blob",
       });
@@ -348,6 +355,7 @@ export default function StaffPortal() {
                 </button>
               ))}
             </div>
+            {tab === "CREDITED" && <AdmissionFilter value={dischargeStatus} onChange={setDischargeStatus} />}
 
             <label>Search by patient name or phone</label>
             <div style={{ display: "flex", gap: 8 }}>

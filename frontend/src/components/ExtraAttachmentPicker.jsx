@@ -41,7 +41,13 @@ const formatSize = (bytes) => (bytes >= 1024 * 1024 ? `${(bytes / 1024 / 1024).t
 
 // An optional extra document to send along with a lead — typically a prescription, in addition
 // to the card photo. On a phone the file chooser offers the camera, the photo gallery, and files.
-export default function ExtraAttachmentPicker({ file, onChange }) {
+export default function ExtraAttachmentPicker({
+  file,
+  onChange,
+  label = "Prescription or other document (optional)",
+  buttonText = "Attach a file or photo",
+  hint = "For example a prescription, to go along with the card. A photo or PDF, up to 8 MB.",
+}) {
   const inputRef = useRef(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -64,7 +70,7 @@ export default function ExtraAttachmentPicker({ file, onChange }) {
 
   return (
     <div style={{ marginBottom: 12 }}>
-      <label>Prescription or other document (optional)</label>
+      <label>{label}</label>
       <input ref={inputRef} type="file" accept="image/*,application/pdf" onChange={handlePick} style={{ display: "none" }} />
       {file ? (
         <div style={{ display: "flex", alignItems: "center", gap: 8, margin: "6px 0 4px", padding: "8px 10px", border: "1.5px solid var(--border)", borderRadius: 10, background: "var(--teal-50)", fontSize: 13.5 }}>
@@ -77,14 +83,14 @@ export default function ExtraAttachmentPicker({ file, onChange }) {
         </div>
       ) : (
         <button type="button" className="secondary" disabled={busy} style={{ marginTop: 6 }} onClick={() => inputRef.current?.click()}>
-          <Paperclip size={15} /> {busy ? "Preparing…" : "Attach a file or photo"}
+          <Paperclip size={15} /> {busy ? "Preparing…" : buttonText}
         </button>
       )}
       {error ? (
         <p className="error" style={{ margin: "6px 0 0" }}>{error}</p>
       ) : (
         <p style={{ fontSize: 11.5, color: "var(--ink-soft)", margin: "6px 0 0" }}>
-          For example a prescription, to go along with the card. A photo or PDF, up to 8 MB.
+          {hint}
         </p>
       )}
     </div>

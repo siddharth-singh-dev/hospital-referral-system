@@ -6,6 +6,7 @@ import { Lock, TrendingUp, LogOut, UserPlus, Paperclip, ChevronRight, X, Refresh
 import Modal from "../components/Modal";
 import CardScanUpload, { CARD_TYPES } from "../components/CardScanUpload";
 import ExtraAttachmentPicker from "../components/ExtraAttachmentPicker";
+import LeadUpdateModal from "../components/LeadUpdateModal";
 import { pairError, panelOptionsForCard, cardOptionsForPanel } from "../utils/cardPanelRules";
 import { PANEL_OPTIONS } from "../utils/panels";
 
@@ -53,6 +54,7 @@ export default function MarketingPersonDashboard() {
   const [myLeads, setMyLeads] = useState([]);
   const [myLeadsFilter, setMyLeadsFilter] = useState("ALL");
   const [myLeadsLoading, setMyLeadsLoading] = useState(false);
+  const [selectedLeadId, setSelectedLeadId] = useState(null); // the lead open in the "add a note / file" screen
 
   // -------------------- Submit a lead --------------------
   const [showLeadForm, setShowLeadForm] = useState(false);
@@ -84,6 +86,7 @@ export default function MarketingPersonDashboard() {
   const cardLocked = lastEdited === "panel" && cardChoices.length === 1;
   // The card block opens on demand, and stays open once anything is in it (including a card type the Panel just locked in).
   const cardOpen = showCardSection || Boolean(attachmentCardType || idNumber || attachmentFile);
+  const selectedLead = myLeads.find((l) => l.id === selectedLeadId); // re-read from the list so it refreshes after an update
 
   function handleCardTypeChange(c) {
     setAttachmentCardType(c);
@@ -455,6 +458,7 @@ export default function MarketingPersonDashboard() {
             }
             return (
               <>
+                <p style={{ fontSize: 12, color: "var(--ink-soft)", margin: "0 2px 6px" }}>Tap a lead to add a note or a file to it.</p>
                 <div style={{ display: "grid", gridTemplateColumns: "1.4fr 1.3fr 0.6fr", gap: 8, padding: "0 2px 6px", borderBottom: "1.5px solid #e4e7ee", fontSize: 11, fontWeight: 700, color: "var(--ink-soft)", textTransform: "uppercase" }}>
                   <span>Patient</span>
                   <span>Status</span>
@@ -466,7 +470,11 @@ export default function MarketingPersonDashboard() {
                     return (
                       <div
                         key={l.id}
-                        style={{ display: "grid", gridTemplateColumns: "1.4fr 1.3fr 0.6fr", gap: 8, alignItems: "start", padding: "9px 2px", borderBottom: "1px solid #f0f1f5", fontSize: 13 }}
+                        role="button"
+                        tabIndex={0}
+                        onClick={() => setSelectedLeadId(l.id)}
+                        onKeyDown={(e) => { if (e.key === "Enter") setSelectedLeadId(l.id); }}
+                        style={{ display: "grid", gridTemplateColumns: "1.4fr 1.3fr 0.6fr", gap: 8, alignItems: "start", padding: "9px 2px", borderBottom: "1px solid #f0f1f5", fontSize: 13, cursor: "pointer" }}
                       >
                         <div style={{ minWidth: 0 }}>
                           <div style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{l.patientName}</div>
@@ -532,6 +540,10 @@ export default function MarketingPersonDashboard() {
           </button>
         </div>
       </div>
+
+      {selectedLead && (
+        <LeadUpdateModal lead={selectedLead} token={token} onClose={() => setSelectedLeadId(null)} onUpdated={() => loadMyLeads(token)} />
+      )}
 
       {showLeadersModal && (
         <Modal title="Your leaders" onClose={() => setShowLeadersModal(false)} width={560}>

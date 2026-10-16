@@ -10,7 +10,7 @@ export default function LeadNote({ text }) {
       style={{
         display: "flex", alignItems: "flex-start", gap: 5, marginTop: 4, padding: "4px 8px",
         maxWidth: 320, borderRadius: 6, background: "var(--amber-50)", color: "var(--amber-700)",
-        fontSize: 12, fontWeight: 500, lineHeight: 1.35, whiteSpace: "normal", wordBreak: "break-word",
+        fontSize: 12, fontWeight: 500, lineHeight: 1.35, whiteSpace: "pre-line", wordBreak: "break-word",
       }}
     >
       <MessageSquare size={12} style={{ flexShrink: 0, marginTop: 2 }} />

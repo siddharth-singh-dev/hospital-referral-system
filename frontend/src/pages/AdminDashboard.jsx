@@ -27,6 +27,7 @@ import MarketingPersonReferralsModal from "../components/MarketingPersonReferral
 import AttachmentIcon from "../components/AttachmentIcon";
 import LeadNote from "../components/LeadNote";
 import MissingDetails from "../components/MissingDetails";
+import AdmissionFilter from "../components/AdmissionFilter";
 import NotificationBell from "../components/NotificationBell";
 import { PANEL_OPTIONS } from "../utils/panels";
 import { statusLabel } from "../utils/referralStatus";
@@ -123,6 +124,7 @@ export default function AdminDashboard() {
   const [referralSearch, setReferralSearch] = useState("");
   const [referralDoctorId, setReferralDoctorId] = useState("");
   const [unpaidOnly, setUnpaidOnly] = useState(false);
+  const [dischargeStatus, setDischargeStatus] = useState(""); // "" | "admitted" | "discharged" — only used on the Admitted tab
   const [bulkRedeeming, setBulkRedeeming] = useState(false);
   const [referralDateFrom, setReferralDateFrom] = useState("");
   const [referralDateTo, setReferralDateTo] = useState("");
@@ -231,6 +233,7 @@ export default function AdminDashboard() {
         from: referralDateFrom || undefined,
         to: referralDateTo || undefined,
         unpaidOnly: unpaidOnly || undefined,
+        dischargeStatus: dischargeStatus || undefined,
         page: referralPage,
         pageSize: REFERRALS_PAGE_SIZE,
       },
@@ -249,7 +252,7 @@ export default function AdminDashboard() {
   }
 
   async function handleBulkRedeem() {
-    const confirmMsg = `Mark all unpaid credited referrals matching the current filters as redeemed? This cannot be undone in bulk — you'd need to fix them one at a time afterward.`;
+    const confirmMsg = `Mark all unpaid credited referrals matching the current filters (including Admitted / Discharged, if one is selected) as redeemed? This cannot be undone in bulk — you'd need to fix them one at a time afterward.`;
     if (!confirm(confirmMsg)) return;
     setBulkRedeeming(true);
     try {
@@ -259,6 +262,7 @@ export default function AdminDashboard() {
           search: referralSearch || undefined,
           from: referralDateFrom || undefined,
           to: referralDateTo || undefined,
+          dischargeStatus: dischargeStatus || undefined,
         },
       });
       setMessage(data.message);
@@ -326,8 +330,11 @@ export default function AdminDashboard() {
   }, []);
   useEffect(() => { if (activeTab === "All Referrals") loadReferralStatusCounts(); }, [referrals.length]);
   useEffect(() => { if (activeTab === "Marketing") loadMarketingList(); }, [activeTab]);
-  useEffect(() => { if (activeTab === "All Referrals") setReferralPage(1); }, [activeTab, referralTab, referralDoctorId, referralDateFrom, referralDateTo, unpaidOnly]);
-  useEffect(() => { if (activeTab === "All Referrals") loadReferrals(); }, [activeTab, referralTab, referralDoctorId, referralDateFrom, referralDateTo, unpaidOnly, referralPage]);
+  useEffect(() => { if (activeTab === "All Referrals") setReferralPage(1); }, [activeTab, referralTab, referralDoctorId, referralDateFrom, referralDateTo, unpaidOnly, dischargeStatus]);
+  useEffect(() => { if (activeTab === "All Referrals") loadReferrals(); }, [activeTab, referralTab, referralDoctorId, referralDateFrom, referralDateTo, unpaidOnly, dischargeStatus, referralPage]);
+  // These two only exist on the Admitted tab. Left switched on, they'd silently hide every row on the other tabs
+  // (a Pending lead has no credit and no discharge date), with the controls out of sight.
+  useEffect(() => { if (referralTab !== "CREDITED") { setDischargeStatus(""); setUnpaidOnly(false); } }, [referralTab]);
   useEffect(() => { setDoctorPage(1); }, [doctorSearch, doctorStatusFilter, doctorDateFrom, doctorDateTo]);
 
   async function handleCreateDoctor(e) {
@@ -596,6 +603,7 @@ export default function AdminDashboard() {
           doctorId: referralDoctorId || undefined,
           from: referralDateFrom || undefined,
         to: referralDateTo || undefined,
+          dischargeStatus: dischargeStatus || undefined,
         },
         responseType: "blob",
       });
@@ -1712,6 +1720,7 @@ export default function AdminDashboard() {
                 <button className="secondary" style={{ width: "auto", padding: "6px 14px" }} onClick={() => exportReferrals("pdf")}><Download size={14} />PDF</button>
               </div>
             </div>
+            {referralTab === "CREDITED" && <AdmissionFilter value={dischargeStatus} onChange={setDischargeStatus} />}
             {referralTotal > 0 && (
               <p style={{ fontSize: 13, color: "var(--ink-soft)", marginTop: -4 }}>
                 Showing {(referralPage - 1) * REFERRALS_PAGE_SIZE + 1}–{Math.min(referralPage * REFERRALS_PAGE_SIZE, referralTotal)} of {referralTotal}
@@ -1739,7 +1748,7 @@ export default function AdminDashboard() {
                     style={{ width: "auto", padding: "6px 14px", color: "#b45309", borderColor: "#fcd9a8" }}
                     disabled={bulkRedeeming || referralTotal === 0}
                     onClick={handleBulkRedeem}
-                    title="Applies to every unpaid credited referral matching your current Doctor / date / search filters — not just this page."
+                    title="Applies to every unpaid credited referral matching your current Doctor / date / search / Admitted-Discharged filters — not just this page."
                   >
                     <CheckCircle2 size={14} />
                     {bulkRedeeming ? "Marking…" : "Mark all as redeemed"}

@@ -16,6 +16,7 @@ import { logActivity, diffFields, ACTIONS } from "../utils/activityLog.js";
 import { notify, NOTIFICATION_TYPES } from "../utils/notifications.js";
 import { normalizePanel } from "../utils/panels.js";
 import { checkCardPanelPair, needsCardReview } from "../utils/cardPanelRules.js";
+import { istStamp } from "../utils/istDate.js";
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024 } });
 
@@ -52,11 +53,8 @@ const uploadAttachment = multer({
 });
 // A lead can carry two optional files: the card photo ("attachment") and an extra document such
 // as a prescription ("extraAttachment"). Upload problems come back as a clear 400.
-const uploadLeadFiles = (req, res, next) =>
-  uploadAttachment.fields([
-    { name: "attachment", maxCount: 1 },
-    { name: "extraAttachment", maxCount: 1 },
-  ])(req, res, (err) => {
+const attachmentUploader = (fields) => (req, res, next) =>
+  uploadAttachment.fields(fields)(req, res, (err) => {
     if (!err) return next();
     const message =
       err.code === "LIMIT_FILE_SIZE" ? "That file is too large — 8 MB is the maximum"
@@ -64,6 +62,15 @@ const uploadLeadFiles = (req, res, next) =>
       : "Could not upload the file — please try again";
     res.status(400).json({ error: message });
   });
+const uploadLeadFiles = attachmentUploader([
+  { name: "attachment", maxCount: 1 },
+  { name: "extraAttachment", maxCount: 1 },
+]);
+// Files a marketing person adds to a lead AFTER submitting it.
+const uploadUpdateFiles = attachmentUploader([
+  { name: "cardPhoto", maxCount: 1 },
+  { name: "document", maxCount: 1 },
+]);
 
 const router = express.Router();
 
@@ -1730,6 +1737,105 @@ router.post("/marketing-submit", requireAuth, requireRole("MARKETING"), uploadLe
       : "Lead submitted — it'll show up as Pending until reception confirms it.",
     referralId: referral.id,
     doctorName: doctor.name,
+  });
+});
+
+// POST /api/referrals/:id/marketing-update  (marketing person's own portal only)
+// Lets a marketing person add to a lead they've already submitted — a note, a card photo, and/or a
+// prescription or other document — for as long as it's still waiting (Pending / Card Activity).
+// Fields: note (text, optional), cardPhoto (file, optional), document (file, optional).
+//   - Only the marketing person whose leader the lead came through can touch it; anyone else gets
+//     a 404 (not a 403) so lead ids can't be probed.
+//   - Files only ever fill an EMPTY slot — nothing already on the lead is replaced or deleted.
+//   - A note is appended on a new line, stamped with the date and time, never overwriting.
+//   - A card photo on an Ayushman lead that was waiting without one moves it to Card Activity,
+//     since there is now something for reception to verify.
+//   - Reception is notified, and the update is written to the Activity Log.
+router.post("/:id/marketing-update", requireAuth, requireRole("MARKETING"), uploadUpdateFiles, async (req, res) => {
+  const cardFile = req.files?.cardPhoto?.[0];
+  const docFile = req.files?.document?.[0];
+  // multer has already written any files to disk, so every rejection removes them again.
+  const reject = (status, payload) => {
+    for (const f of [cardFile, docFile]) if (f) fs.unlink(f.path, () => {});
+    return res.status(status).json(payload);
+  };
+
+  const noteText = String(req.body?.note ?? "").trim();
+  if (!noteText && !cardFile && !docFile) return reject(400, { error: "Add a note or attach a file to send an update" });
+  if (noteText.length > 300) return reject(400, { error: "Keep the note to 300 characters or fewer" });
+
+  const person = await prisma.marketingPerson.findUnique({ where: { id: req.user.marketingPersonId } });
+  if (!person || !person.active) return reject(403, { error: "This account is not active" });
+
+  const referral = await prisma.referral.findUnique({
+    where: { id: req.params.id },
+    include: { doctor: { select: { name: true, hospitalId: true, marketingPersonId: true } } },
+  });
+  if (
+    !referral ||
+    referral.doctor.hospitalId !== req.user.hospitalId ||
+    referral.doctor.marketingPersonId !== req.user.marketingPersonId
+  ) {
+    return reject(404, { error: "Lead not found" });
+  }
+  if (!["PENDING", "CARD_REVIEW"].includes(referral.status)) {
+    return reject(409, { error: `This lead is already ${referral.status.replace("_", " ").toLowerCase()}, so it can't be updated now. Tell reception directly.` });
+  }
+  if (cardFile && referral.attachmentPath) return reject(409, { error: "This lead already has a card photo" });
+  if (docFile && referral.extraAttachmentPath) return reject(409, { error: "This lead already has a document attached" });
+
+  const data = {};
+  if (noteText) {
+    const line = `${istStamp()} — ${noteText}`;
+    const combined = referral.leadNote ? `${referral.leadNote}\n${line}` : line;
+    if (combined.length > 2000) return reject(400, { error: "This lead already has a lot of notes — tell reception directly" });
+    data.leadNote = combined;
+  }
+  if (cardFile) data.attachmentPath = path.basename(cardFile.path);
+  if (docFile) data.extraAttachmentPath = path.basename(docFile.path);
+  const movesToCardActivity =
+    Boolean(cardFile) && referral.status === "PENDING" && needsCardReview(referral.idType, referral.panel, true);
+  if (movesToCardActivity) data.status = "CARD_REVIEW";
+
+  // Guarded on everything we read: if reception (or a second tap) changed the lead in the meantime,
+  // nothing is written and the person is asked to try again — no lost notes, no overwritten files.
+  const result = await prisma.referral.updateMany({
+    where: {
+      id: referral.id,
+      status: referral.status,
+      leadNote: referral.leadNote,
+      attachmentPath: referral.attachmentPath,
+      extraAttachmentPath: referral.extraAttachmentPath,
+    },
+    data,
+  });
+  if (result.count !== 1) return reject(409, { error: "This lead was just updated — please try again" });
+
+  logActivity({
+    actor: req.user,
+    action: ACTIONS.REFERRAL_UPDATED_BY_MARKETING,
+    entityType: "Referral",
+    entityId: referral.id,
+    entityLabel: referral.patientName,
+    changes: movesToCardActivity ? { status: { from: "PENDING", to: "CARD_REVIEW" } } : undefined,
+    metadata: { doctorId: referral.doctorId, addedNote: Boolean(noteText), addedCardPhoto: Boolean(cardFile), addedDocument: Boolean(docFile), movedToCardActivity: movesToCardActivity },
+  });
+
+  const added = [noteText && "note", cardFile && "card photo", docFile && "document"].filter(Boolean).join(", ");
+  notify({
+    hospitalId: req.user.hospitalId,
+    type: movesToCardActivity ? NOTIFICATION_TYPES.CARD_REVIEW_NEW : NOTIFICATION_TYPES.LEAD_UPDATED,
+    message: movesToCardActivity
+      ? `New card to verify — ${referral.patientName} (card photo added, via ${referral.doctor.name})`
+      : `Update on ${referral.patientName} (via ${referral.doctor.name}) — ${added} added`,
+    referralId: referral.id,
+  });
+
+  res.json({
+    message: movesToCardActivity
+      ? "Update sent — the card photo is with reception for verification."
+      : "Update sent — reception has been notified.",
+    status: data.status || referral.status,
   });
 });
 

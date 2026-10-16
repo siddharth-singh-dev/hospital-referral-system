@@ -270,10 +270,11 @@ model Referral {
   // a prescription (photo or PDF). Served by GET /referrals/:id/attachment/extra.
   extraAttachmentPath String?
 
-  // A short free-text note the marketing person sends along with the lead (e.g. "cash patient,
-  // prescription attached, wants a private room") so reception sees it in Card Activity /
-  // Pending without having to phone anyone. Max 300 chars; null when none was given.
-  leadNote        String?        @db.VarChar(300)
+  // Notes from the marketing person (e.g. "cash patient, prescription attached, wants a private
+  // room") so reception sees them in Card Activity / Pending without having to phone anyone. The
+  // note sent with the lead (max 300 chars) comes first; any later update from the portal is
+  // appended on a new line, prefixed with the date and time. Up to 2000 chars in total.
+  leadNote        String?        @db.VarChar(2000)
 
   // Set when an admin reverts a rejected lead back to PENDING. The auto-reject timer
   // (src/utils/autoReject.js) counts from this instead of createdAt when it's set, so a

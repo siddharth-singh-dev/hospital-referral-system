@@ -16,6 +16,7 @@ export async function notify({ hospitalId, type, message, referralId }) {
 export const NOTIFICATION_TYPES = {
   CARD_REVIEW_NEW: "CARD_REVIEW_NEW",   // a marketing-submitted lead with a card photo needs verification
   PENDING_NEW: "PENDING_NEW",           // a fresh lead landed in the Pending queue
+  LEAD_UPDATED: "LEAD_UPDATED",         // a marketing employee added a note / file to a lead that is already waiting
   REFERRAL_CREDITED: "REFERRAL_CREDITED",
   REFERRAL_REJECTED: "REFERRAL_REJECTED",
 };

@@ -20,6 +20,7 @@ const TYPE_DOT_COLOR = {
   PENDING_NEW: "#f59e0b",
   REFERRAL_CREDITED: "#16a34a",   // green — matches Credited
   REFERRAL_REJECTED: "#dc2626",   // red — matches Rejected
+  LEAD_UPDATED: "#0ea5e9",        // blue — a marketing person added a note/file to a lead that's already waiting
 };
 
 // Shared across ReceptionDashboard, AdminDashboard, and StaffPortal. Polls for new referral

@@ -50,3 +50,10 @@ export function istDayBounds(dateStr) {
   const startUtcMs = Date.UTC(y, m - 1, d, 0, 0, 0) - IST_OFFSET_MS;
   return { start: new Date(startUtcMs), end: new Date(startUtcMs + 24 * 60 * 60 * 1000) };
 }
+
+// "16 Oct, 11:20 am" — a compact date + time in India time, used to stamp notes appended to a lead.
+export function istStamp(date = new Date()) {
+  return new Intl.DateTimeFormat("en-IN", {
+    timeZone: "Asia/Kolkata", day: "numeric", month: "short", hour: "numeric", minute: "2-digit", hour12: true,
+  }).format(date);
+}

@@ -357,6 +357,8 @@ router.get("/public/me/leads", requireAuth, requireRole("MARKETING"), async (req
       idType: true,
       idNumber: true,
       attachmentPath: true,
+      extraAttachmentPath: true,
+      leadNote: true,
       panel: true,
       status: true,
       rejectedReason: true,
@@ -375,6 +377,11 @@ router.get("/public/me/leads", requireAuth, requireRole("MARKETING"), async (req
       cardType: r.idType,
       panel: r.panel,
       submittedAt: r.createdAt,
+      // what the lead already carries, and whether it can still be added to (see POST /referrals/:id/marketing-update)
+      leadNote: r.leadNote,
+      hasCardPhoto: Boolean(r.attachmentPath),
+      hasDocument: Boolean(r.extraAttachmentPath),
+      canUpdate: ["PENDING", "CARD_REVIEW"].includes(r.status),
       ...leadStage(r),
     }))
   );
