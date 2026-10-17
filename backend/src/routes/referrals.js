@@ -473,6 +473,15 @@ router.post("/bulk-import", requireAuth, requireRole("ADMIN"), upload.single("fi
   // Same caching approach for marketing persons, matched/created by name.
   const existingMarketingPersons = await prisma.marketingPerson.findMany({ where: { hospitalId: req.user.hospitalId } });
   const marketingCache = new Map(existingMarketingPersons.map((m) => [m.name.trim().toLowerCase(), m]));
+  // Spellings left behind by merging duplicates ("MUNESH SIR" merged into "MUNESH") resolve to the
+  // surviving person too, so a sheet that still uses the old spelling doesn't recreate the duplicate.
+  for (const m of existingMarketingPersons) {
+    for (const alias of Array.isArray(m.aliases) ? m.aliases : []) {
+      if (typeof alias !== "string") continue;
+      const aliasKey = alias.trim().toLowerCase();
+      if (aliasKey && !marketingCache.has(aliasKey)) marketingCache.set(aliasKey, m);
+    }
+  }
   let newMarketingPersonsCreated = 0;
 
   const getCell = (row, col) => (col ? row.getCell(col).value : null);

@@ -28,6 +28,7 @@ export const ACTIONS = {
   DOCTOR_UPDATED: "doctor.updated",
   MARKETING_PERSON_CREATED: "marketing_person.created",
   MARKETING_PERSON_UPDATED: "marketing_person.updated",
+  MARKETING_PERSON_MERGED: "marketing_person.merged", // duplicate records folded into one (leaders + leads moved)
   STAFF_CREATED: "staff.created",
   STAFF_PASSWORD_RESET: "staff.password_reset",
   STAFF_DELETED: "staff.deleted",

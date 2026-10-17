@@ -28,6 +28,8 @@ import AttachmentIcon from "../components/AttachmentIcon";
 import LeadNote from "../components/LeadNote";
 import MissingDetails from "../components/MissingDetails";
 import AdmissionFilter from "../components/AdmissionFilter";
+import MergeMarketingPersonsModal from "../components/MergeMarketingPersonsModal";
+import { findDuplicateGroups } from "../utils/duplicateNames";
 import NotificationBell from "../components/NotificationBell";
 import { PANEL_OPTIONS } from "../utils/panels";
 import { statusLabel } from "../utils/referralStatus";
@@ -169,6 +171,9 @@ export default function AdminDashboard() {
   const [marketingSortDir, setMarketingSortDir] = useState("desc");
   const [marketingPage, setMarketingPage] = useState(1);
   const [showMarketingForm, setShowMarketingForm] = useState(false);
+  const [selectedMarketingIds, setSelectedMarketingIds] = useState([]); // ticked rows, kept across pages — for merging duplicates
+  const [mergeIds, setMergeIds] = useState(null); // the people open in the merge dialog (null = closed)
+  const [duplicatesDismissed, setDuplicatesDismissed] = useState(false);
   const [editingMarketingPerson, setEditingMarketingPerson] = useState(null);
   const [marketingQr, setMarketingQr] = useState(null); // { name, portalUrl, qrDataUrl }
   const [viewingMarketingPersonId, setViewingMarketingPersonId] = useState(null);
@@ -682,6 +687,7 @@ export default function AdminDashboard() {
     return list;
   }, [marketingList, marketingSearch, marketingSortKey, marketingSortDir]);
 
+  const duplicateGroups = useMemo(() => findDuplicateGroups(marketingList), [marketingList]);
   const MARKETING_PAGE_SIZE = 10;
   const marketingPageCount = Math.max(1, Math.ceil(filteredSortedMarketing.length / MARKETING_PAGE_SIZE));
   const paginatedMarketing = filteredSortedMarketing.slice((marketingPage - 1) * MARKETING_PAGE_SIZE, marketingPage * MARKETING_PAGE_SIZE);
@@ -1431,8 +1437,30 @@ export default function AdminDashboard() {
               </button>
             </div>
             <p style={{ color: "var(--ink-soft)", fontSize: 13, marginTop: -6 }}>
-              Every leader is optionally associated with one of these hospital marketing-team members. Click a row for their full report.
+              Every leader is optionally associated with one of these hospital marketing-team members. Click a row for their full report. If the same person appears under different spellings, tick them and choose Merge.
             </p>
+
+            {duplicateGroups.length > 0 && !duplicatesDismissed && (
+              <div style={{ background: "var(--amber-50)", color: "var(--amber-700)", borderRadius: 10, padding: "10px 14px", marginTop: 12, fontSize: 13.5 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "center" }}>
+                  <strong>
+                    {duplicateGroups.length} possible duplicate{duplicateGroups.length === 1 ? "" : "s"} found — the same name spelled differently?
+                  </strong>
+                  <button type="button" className="secondary" style={{ width: "auto", padding: "3px 10px", fontSize: 12 }} onClick={() => setDuplicatesDismissed(true)}>Hide</button>
+                </div>
+                <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 8 }}>
+                  {duplicateGroups.slice(0, 6).map((g) => (
+                    <div key={g.key} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10 }}>
+                      <span>{g.people.map((p) => p.name).join("  ·  ")}</span>
+                      <button type="button" style={{ width: "auto", padding: "4px 12px", fontSize: 12.5 }} onClick={() => setMergeIds(g.people.map((p) => p.id))}>
+                        Review &amp; merge
+                      </button>
+                    </div>
+                  ))}
+                  {duplicateGroups.length > 6 && <span style={{ fontSize: 12 }}>…and {duplicateGroups.length - 6} more.</span>}
+                </div>
+              </div>
+            )}
 
             <div style={{ display: "flex", gap: 8, marginTop: 16, marginBottom: 8 }}>
               <div style={{ position: "relative", flex: 1 }}>
@@ -1440,6 +1468,17 @@ export default function AdminDashboard() {
                 <input style={{ paddingLeft: 34 }} value={marketingSearch} onChange={(e) => { setMarketingSearch(e.target.value); setMarketingPage(1); }} placeholder="Name or phone…" />
               </div>
             </div>
+
+            {selectedMarketingIds.length > 0 && (
+              <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", marginBottom: 8, fontSize: 13.5 }}>
+                <strong>{selectedMarketingIds.length} selected</strong>
+                <button type="button" style={{ width: "auto", padding: "6px 14px" }} disabled={selectedMarketingIds.length < 2} onClick={() => setMergeIds(selectedMarketingIds)}>
+                  Merge selected
+                </button>
+                <button type="button" className="secondary" style={{ width: "auto", padding: "6px 14px" }} onClick={() => setSelectedMarketingIds([])}>Clear</button>
+                {selectedMarketingIds.length < 2 && <span style={{ color: "var(--ink-soft)" }}>Tick at least two people to merge them.</span>}
+              </div>
+            )}
 
             {filteredSortedMarketing.length === 0 ? (
               <EmptyState
@@ -1453,6 +1492,18 @@ export default function AdminDashboard() {
                   <table style={{ marginTop: 8 }}>
                     <thead>
                       <tr>
+                        <th style={{ width: 28 }}>
+                          <input
+                            type="checkbox"
+                            title="Tick everyone on this page"
+                            style={{ width: "auto", margin: 0 }}
+                            checked={paginatedMarketing.length > 0 && paginatedMarketing.every((m) => selectedMarketingIds.includes(m.id))}
+                            onChange={(e) => {
+                              const pageIds = paginatedMarketing.map((m) => m.id);
+                              setSelectedMarketingIds((prev) => (e.target.checked ? [...new Set([...prev, ...pageIds])] : prev.filter((id) => !pageIds.includes(id))));
+                            }}
+                          />
+                        </th>
                         <MarketingSortHeader label="Name" sk="name" />
                         <MarketingSortHeader label="Leaders" sk="leaderCount" />
                         <MarketingSortHeader label="Total Leads" sk="totalReferrals" />
@@ -1466,9 +1517,18 @@ export default function AdminDashboard() {
                     <tbody>
                       {paginatedMarketing.map((m) => (
                         <tr key={m.id} style={{ cursor: "pointer" }} onClick={() => setViewingMarketingPersonId(m.id)}>
+                          <td onClick={(e) => e.stopPropagation()}>
+                            <input
+                              type="checkbox"
+                              style={{ width: "auto", margin: 0 }}
+                              checked={selectedMarketingIds.includes(m.id)}
+                              onChange={(e) => setSelectedMarketingIds((prev) => (e.target.checked ? [...prev, m.id] : prev.filter((id) => id !== m.id)))}
+                            />
+                          </td>
                           <td>
                             <div style={{ fontWeight: 600 }}>{m.name}</div>
                             <div style={{ fontSize: 12, color: "var(--ink-soft)" }}>{m.phone || "—"}</div>
+                            {m.aliases?.length > 0 && <div style={{ fontSize: 11.5, color: "var(--ink-soft)", marginTop: 2 }}>Also imported as: {m.aliases.join(", ")}</div>}
                             {m.headName && <div style={{ fontSize: 11.5, color: "var(--teal-600)", marginTop: 2 }}>Team head: {m.headName}</div>}
                             {!m.hasPassword && (
                               <div style={{ fontSize: 11, color: "#b45309", marginTop: 2 }}>No portal password set — edit to add one</div>
@@ -1986,6 +2046,18 @@ export default function AdminDashboard() {
           leader={editingLeader}
           onClose={() => setEditingLeader(null)}
           onSaved={() => { setEditingLeader(null); setMessage("Leader updated."); loadDoctorsAndStaff(); }}
+        />
+      )}
+      {mergeIds && (
+        <MergeMarketingPersonsModal
+          people={marketingList.filter((m) => mergeIds.includes(m.id))}
+          onClose={() => setMergeIds(null)}
+          onMerged={(result) => {
+            setMergeIds(null);
+            setSelectedMarketingIds([]);
+            setMessage(result.message);
+            loadMarketingList();
+          }}
         />
       )}
       {showMarketingForm && (

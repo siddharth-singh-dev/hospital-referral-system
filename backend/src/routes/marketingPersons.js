@@ -64,6 +64,7 @@ router.get("/", requireAuth, requireRole("ADMIN"), async (req, res) => {
       active: p.active,
       createdAt: p.createdAt,
       hasPassword: Boolean(p.passwordHash),
+      aliases: aliasesOf(p),
       headId: p.headId,
       headName: p.teamHead?.name || null,
       leaderCount: p.doctors.length,
@@ -271,6 +272,137 @@ router.patch("/:id", requireAuth, requireRole("ADMIN"), async (req, res) => {
 // ---------------------------------------------------------------------------------------
 
 // POST /api/marketing-persons/public/:id/login  { password }
+// ---------------------------------------------------------------------------------------
+// Merging duplicate marketing people (the same person imported under different spellings).
+// ---------------------------------------------------------------------------------------
+const aliasesOf = (p) => (Array.isArray(p.aliases) ? p.aliases.filter((a) => typeof a === "string") : []);
+
+// The names a merged person should answer to: everything the merged records were called, minus the
+// final name itself, de-duplicated ignoring case.
+function mergeAliases(finalName, names) {
+  const seen = new Set([finalName.trim().toLowerCase()]);
+  const out = [];
+  for (const raw of names) {
+    const alias = String(raw ?? "").trim();
+    const key = alias.toLowerCase();
+    if (!alias || seen.has(key)) continue;
+    seen.add(key);
+    out.push(alias);
+  }
+  return out.slice(0, 50);
+}
+
+class MergeError extends Error {
+  constructor(status, message) { super(message); this.status = status; }
+}
+
+const mergeSchema = z.object({
+  targetId: z.string().uuid(), // the person who stays
+  sourceIds: z.array(z.string().uuid()).min(1).max(20), // the duplicates folded into them
+  name: z.string().trim().min(1).max(100).optional(), // the name to end up with (default: the kept person's own)
+});
+
+// POST /api/marketing-persons/merge  (admin)
+// Folds one or more duplicate marketing people into a single one. Referrals don't point at a
+// marketing person directly — they belong to a leader, and the leader belongs to a marketing person —
+// so moving the leaders moves every lead, credit and insight with them. In ONE transaction:
+//   - the duplicates' leaders are reassigned to the person being kept;
+//   - details the kept person is missing (phone, email, portal password, team head) are filled from
+//     the duplicates, first one wins; the result is active if ANY of them was;
+//   - the duplicates' names (and their own aliases) are remembered as aliases of the kept person;
+//   - the duplicate records are deleted.
+// Either all of that happens or none of it does. The Activity Log records who was merged and which
+// leaders moved, so a mistaken merge can be reversed from the Leaders tab.
+router.post("/merge", requireAuth, requireRole("ADMIN"), async (req, res) => {
+  const parsed = mergeSchema.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({ error: "Choose the person to keep and at least one other to merge into them" });
+  }
+  const { targetId, name } = parsed.data;
+  const sourceIds = [...new Set(parsed.data.sourceIds)];
+  if (sourceIds.includes(targetId)) {
+    return res.status(400).json({ error: "The person you keep can't also be one of the ones merged away" });
+  }
+  const hospitalId = req.user.hospitalId;
+  const allIds = [targetId, ...sourceIds];
+
+  let outcome;
+  try {
+    outcome = await prisma.$transaction(async (tx) => {
+      const found = await tx.marketingPerson.findMany({
+        where: { id: { in: allIds }, hospitalId },
+        include: { doctors: { select: { id: true, name: true } } },
+      });
+      if (found.length !== allIds.length) throw new MergeError(404, "One or more of those marketing people weren't found");
+      const target = found.find((p) => p.id === targetId);
+      const sources = sourceIds.map((id) => found.find((p) => p.id === id));
+      const finalName = (name || target.name).trim();
+
+      // Don't create a new duplicate while cleaning up the old ones
+      const clash = await tx.marketingPerson.findFirst({ where: { hospitalId, id: { notIn: allIds }, name: finalName } });
+      if (clash) throw new MergeError(409, `Another marketing person is already called "${clash.name}". Pick a different name, or merge that one in as well.`);
+
+      const leadCounts = {};
+      for (const p of found) leadCounts[p.id] = await tx.referral.count({ where: { doctor: { marketingPersonId: p.id } } });
+
+      const moved = await tx.doctor.updateMany({
+        where: { marketingPersonId: { in: sourceIds }, hospitalId },
+        data: { marketingPersonId: targetId },
+      });
+
+      const firstOf = (key) => sources.map((s) => s[key]).find(Boolean) ?? null;
+      const updated = await tx.marketingPerson.update({
+        where: { id: targetId },
+        data: {
+          name: finalName,
+          phone: target.phone || firstOf("phone"),
+          email: target.email || firstOf("email"),
+          passwordHash: target.passwordHash || firstOf("passwordHash"),
+          headId: target.headId || firstOf("headId"),
+          active: target.active || sources.some((s) => s.active),
+          aliases: mergeAliases(finalName, [target.name, ...aliasesOf(target), ...sources.flatMap((s) => [s.name, ...aliasesOf(s)])]),
+        },
+      });
+
+      await tx.marketingPerson.deleteMany({ where: { id: { in: sourceIds }, hospitalId } });
+
+      return {
+        person: updated,
+        previousName: target.name,
+        merged: sources.map((s) => ({
+          id: s.id,
+          name: s.name,
+          leaderCount: s.doctors.length,
+          leadCount: leadCounts[s.id],
+          leaders: s.doctors.map((d) => d.name).slice(0, 50),
+        })),
+        leadersMoved: moved.count,
+        leadsMoved: sources.reduce((n, s) => n + leadCounts[s.id], 0),
+      };
+    });
+  } catch (err) {
+    if (err instanceof MergeError) return res.status(err.status).json({ error: err.message });
+    throw err;
+  }
+
+  logActivity({
+    actor: req.user,
+    action: ACTIONS.MARKETING_PERSON_MERGED,
+    entityType: "MarketingPerson",
+    entityId: targetId,
+    entityLabel: outcome.person.name,
+    metadata: { keptId: targetId, previousName: outcome.previousName, merged: outcome.merged, leadersMoved: outcome.leadersMoved, leadsMoved: outcome.leadsMoved },
+  });
+
+  res.json({
+    message: `Merged ${sourceIds.length + 1} records into ${outcome.person.name} — ${outcome.leadersMoved} leader${outcome.leadersMoved === 1 ? "" : "s"} and ${outcome.leadsMoved} lead${outcome.leadsMoved === 1 ? "" : "s"} now sit under one name.`,
+    person: { id: outcome.person.id, name: outcome.person.name },
+    leadersMoved: outcome.leadersMoved,
+    leadsMoved: outcome.leadsMoved,
+    mergedCount: sourceIds.length + 1,
+  });
+});
+
 router.post("/public/:id/login", async (req, res) => {
   const { password } = req.body || {};
   if (!password) return res.status(400).json({ error: "Password is required" });

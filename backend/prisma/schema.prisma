@@ -140,6 +140,12 @@ model MarketingPerson {
   headId     String?
   teamHead   StaffUser? @relation("MarketingTeamHead", fields: [headId], references: [id], onDelete: SetNull)
 
+  // Other spellings of this person's name (a JSON array of strings), left behind when duplicate
+  // records are merged into this one (e.g. "MUNESH SIR" merged into "MUNESH"). The bulk import
+  // treats an alias exactly like the name itself, so importing a sheet that still says
+  // "Munesh Sir" lands on this person instead of creating the duplicate all over again.
+  aliases    Json?
+
   doctors    Doctor[]
 }
 
