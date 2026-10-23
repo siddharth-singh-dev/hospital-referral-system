@@ -2,6 +2,8 @@ import { useEffect, useState } from "react";
 import { CheckCircle2 } from "lucide-react";
 import Modal from "./Modal";
 import api from "../api/client";
+import FileNumberInput from "./FileNumberInput";
+import { buildFileNumber, financialYearLabel } from "../utils/fileNumber";
 
 // Confirms a lead's arrival: reception records the visit's IPD/OPD file number, whether this
 // was an IPD or OPD visit, and the patient's card/ID number (required — this is what powers
@@ -11,7 +13,8 @@ import api from "../api/client";
 export default function ConfirmLeadModal({ patientName, doctorName, initialIdNumber, onClose, onConfirm }) {
   const [amounts, setAmounts] = useState(null);
   const [loadingAmounts, setLoadingAmounts] = useState(true);
-  const [fileNumber, setFileNumber] = useState("");
+  const [fileNumber, setFileNumber] = useState(""); // just the digits — prefix and financial year are fixed
+  const fy = financialYearLabel();
   const [visitType, setVisitType] = useState("OPD");
   const [idNumber, setIdNumber] = useState(initialIdNumber || "");
   const [submitting, setSubmitting] = useState(false);
@@ -43,7 +46,7 @@ export default function ConfirmLeadModal({ patientName, doctorName, initialIdNum
     }
     setSubmitting(true);
     try {
-      await onConfirm({ fileNumber: fileNumber.trim(), visitType, idNumber: idNumber.trim() });
+      await onConfirm({ fileNumber: buildFileNumber(visitType, fileNumber, fy), visitType, idNumber: idNumber.trim() });
     } catch (err) {
       setError(err?.response?.data?.error || "Failed to confirm this lead.");
       setSubmitting(false);
@@ -75,7 +78,7 @@ export default function ConfirmLeadModal({ patientName, doctorName, initialIdNum
         </div>
 
         <label>{visitType} file number</label>
-        <input value={fileNumber} onChange={(e) => setFileNumber(e.target.value)} placeholder={`e.g. ${visitType}-00123`} autoFocus required />
+        <FileNumberInput visitType={visitType} value={fileNumber} onChange={setFileNumber} fy={fy} autoFocus required />
 
         <label>Card / ID number</label>
         <input value={idNumber} onChange={(e) => setIdNumber(e.target.value)} placeholder="Aadhaar, Ayushman, CGHS/ECHS/CAPF card number, etc." required />

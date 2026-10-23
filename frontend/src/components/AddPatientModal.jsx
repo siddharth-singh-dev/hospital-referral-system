@@ -4,6 +4,8 @@ import Modal from "./Modal";
 import CardScanUpload from "./CardScanUpload";
 import api from "../api/client";
 import { PANEL_OPTIONS } from "../utils/panels";
+import FileNumberInput from "./FileNumberInput";
+import { buildFileNumber, financialYearLabel } from "../utils/fileNumber";
 
 // A text input + suggestion dropdown for picking the referring leader. Typing filters the
 // existing list; if nothing matches exactly, an "Add ... as a new leader" option appears at
@@ -85,7 +87,7 @@ export default function AddPatientModal({ onClose, onAdded }) {
   const [patientAge, setPatientAge] = useState("");
   const [patientGender, setPatientGender] = useState("MALE");
   const [patientPhone, setPatientPhone] = useState("");
-  const [fileNumber, setFileNumber] = useState("");
+  const [fileNumber, setFileNumber] = useState(""); // just the digits — prefix and financial year are fixed
   const [visitType, setVisitType] = useState(""); // "" | "OPD" | "IPD" — blank means not yet known
   const [creditAmount, setCreditAmount] = useState("");
   const [admissionDate, setAdmissionDate] = useState("");
@@ -97,6 +99,8 @@ export default function AddPatientModal({ onClose, onAdded }) {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
   const [scanNote, setScanNote] = useState("");
+  // A back-dated admission belongs to the financial year of that date; otherwise the current one.
+  const fy = financialYearLabel(admissionDate ? new Date(admissionDate) : new Date());
 
   useEffect(() => {
     (async () => {
@@ -153,7 +157,7 @@ export default function AddPatientModal({ onClose, onAdded }) {
         idNumber: idNumber.trim() || undefined,
         forceType: forceType.trim() || undefined,
         wardType: wardType.trim() || undefined,
-        fileNumber: fileNumber.trim() || undefined,
+        fileNumber: fileNumber.trim() && visitType ? buildFileNumber(visitType, fileNumber.trim(), fy) : undefined,
         visitType: visitType || undefined,
         creditAmount: creditAmount.trim() !== "" ? Number(creditAmount) : undefined,
         admissionDate: admissionDate || undefined,
@@ -228,7 +232,10 @@ export default function AddPatientModal({ onClose, onAdded }) {
         </div>
 
         <label>File No. (optional)</label>
-        <input value={fileNumber} onChange={(e) => setFileNumber(e.target.value)} placeholder={visitType ? `e.g. ${visitType}-00123` : "e.g. IPD-00123"} />
+        <FileNumberInput visitType={visitType} value={fileNumber} onChange={setFileNumber} fy={fy} />
+        {!visitType && (
+          <p style={{ fontSize: 11.5, color: "var(--ink-soft)", marginTop: -10, marginBottom: 8 }}>Pick a visit type above first — it sets the IPD-/OPD- prefix.</p>
+        )}
         <p style={{ fontSize: 11.5, color: "var(--ink-soft)", marginTop: -6, marginBottom: 8 }}>
           If you already know the file number and visit type, this patient is credited immediately instead of going through a separate "Confirm lead" step.
         </p>

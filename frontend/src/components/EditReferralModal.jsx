@@ -3,6 +3,8 @@ import { Save } from "lucide-react";
 import Modal from "./Modal";
 import api from "../api/client";
 import { PANEL_OPTIONS } from "../utils/panels";
+import FileNumberInput from "./FileNumberInput";
+import { buildFileNumber, financialYearLabel, splitFileNumber } from "../utils/fileNumber";
 
 // Converts an ISO timestamp from the API into the "YYYY-MM-DDTHH:mm" shape a
 // <input type="datetime-local"> expects, in the browser's local time. Empty/missing
@@ -27,7 +29,12 @@ export default function EditReferralModal({ referral, onClose, onSaved }) {
   const [patientAge, setPatientAge] = useState(referral.patientAge != null ? String(referral.patientAge) : "");
   const [patientGender, setPatientGender] = useState(referral.patientGender || ""); // may be blank on a quick lead — don't guess
   const [patientPhone, setPatientPhone] = useState(referral.patientPhone || "");
-  const [fileNumber, setFileNumber] = useState(referral.fileNumber || "");
+  // The file number box holds just the digits; the prefix follows the visit type and the suffix is
+  // the financial year. A number saved before the fixed format existed (e.g. "IPD-9182") can't be
+  // split that way, so it's shown as-is above the box and left untouched unless a new number is typed.
+  const existingFile = splitFileNumber(referral.fileNumber);
+  const legacyFileNumber = referral.fileNumber && !existingFile ? referral.fileNumber : "";
+  const [fileNumber, setFileNumber] = useState(existingFile?.number || "");
   const [visitType, setVisitType] = useState(referral.visitType || "");
   const [panel, setPanel] = useState(referral.panel || "");
   const [idNumber, setIdNumber] = useState(referral.idNumber || "");
@@ -38,10 +45,15 @@ export default function EditReferralModal({ referral, onClose, onSaved }) {
   const [creditAmount, setCreditAmount] = useState(referral.transaction ? String(referral.transaction.amount) : "");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
+  const fy = existingFile?.fy || financialYearLabel(admissionDate ? new Date(admissionDate) : new Date());
 
   async function handleSubmit(e) {
     e.preventDefault();
     setError("");
+    if (fileNumber.trim() && !visitType) {
+      setError("Choose the visit type (IPD or OPD) — it sets the prefix of the file number.");
+      return;
+    }
     setSubmitting(true);
     try {
       const payload = {
@@ -50,7 +62,8 @@ export default function EditReferralModal({ referral, onClose, onSaved }) {
         ...(patientAge !== "" ? { patientAge: Number(patientAge) } : {}),
         ...(patientGender ? { patientGender } : {}),
         patientPhone: patientPhone.trim() || null,
-        fileNumber: fileNumber.trim() || null,
+        // typed number -> full IPD-/OPD- number; blank on an old-format number -> leave it as it is
+        ...(fileNumber.trim() ? { fileNumber: buildFileNumber(visitType, fileNumber.trim(), fy) } : legacyFileNumber ? {} : { fileNumber: null }),
         visitType: visitType || null,
         panel: panel || null,
         idNumber: idNumber.trim() || null,
@@ -104,15 +117,20 @@ export default function EditReferralModal({ referral, onClose, onSaved }) {
         <label>Patient phone (optional)</label>
         <input value={patientPhone} onChange={(e) => setPatientPhone(e.target.value)} placeholder="e.g. 98765 43210" />
 
-        <label>File number (optional)</label>
-        <input value={fileNumber} onChange={(e) => setFileNumber(e.target.value)} placeholder="e.g. IPD-3001" />
-
         <label>Visit type</label>
         <select value={visitType} onChange={(e) => setVisitType(e.target.value)}>
           <option value="">— Not set —</option>
           <option value="IPD">IPD</option>
           <option value="OPD">OPD</option>
         </select>
+
+        <label>File number (optional)</label>
+        {legacyFileNumber && (
+          <p style={{ fontSize: 12, color: "var(--ink-soft)", margin: "2px 0 0" }}>
+            Current: <strong>{legacyFileNumber}</strong> (older format). Leave the box below empty to keep it, or enter the number to replace it with one in the new format.
+          </p>
+        )}
+        <FileNumberInput visitType={visitType} value={fileNumber} onChange={setFileNumber} fy={fy} />
 
         <label>Panel (optional)</label>
         <select value={panel} onChange={(e) => setPanel(e.target.value)}>

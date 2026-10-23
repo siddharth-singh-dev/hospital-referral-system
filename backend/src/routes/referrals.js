@@ -17,6 +17,14 @@ import { notify, NOTIFICATION_TYPES } from "../utils/notifications.js";
 import { normalizePanel } from "../utils/panels.js";
 import { checkCardPanelPair, needsCardReview } from "../utils/cardPanelRules.js";
 import { istStamp } from "../utils/istDate.js";
+import {
+  normalizeFileNumber,
+  isCanonicalFileNumber,
+  findFileNumberHolder,
+  assertFileNumberAvailable,
+  withFileNumberLock,
+  respondIfFileNumberConflict,
+} from "../utils/fileNumber.js";
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024 } });
 
@@ -264,6 +272,24 @@ router.post("/manual", requireAuth, requireAccess(["ADMIN", "RECEPTION"], ["MANA
     fileNumber, visitType, creditAmount, admissionDate, dischargedDate,
   } = parsed.data;
 
+  // Fixed file number format (OPD-13531/26-27 / IPD-13531/26-27). A back-dated admission uses the
+  // financial year of its admission date; otherwise the current one.
+  let canonicalFileNumber = null;
+  if (fileNumber && visitType) {
+    const normalized = normalizeFileNumber(fileNumber, { visitType, date: admissionDate ? new Date(admissionDate) : new Date() });
+    if (normalized.error) return res.status(400).json({ error: normalized.error });
+    canonicalFileNumber = normalized.value;
+    // Early check, before a new leader gets created for a patient that's going to be refused
+    // anyway. The authoritative check runs again under the lock further down.
+    const holder = await findFileNumberHolder(prisma, req.user.hospitalId, canonicalFileNumber);
+    if (holder) {
+      return res.status(409).json({
+        error: `File number ${canonicalFileNumber} is already used by ${holder.patientName}${holder.doctor?.name ? ` (referred by ${holder.doctor.name})` : ""}. A file number can only be used once.`,
+        fileNumberConflict: true,
+      });
+    }
+  }
+
   let doctor;
   let newLeaderCreated = false;
   if (doctorId) {
@@ -293,35 +319,48 @@ router.post("/manual", requireAuth, requireAccess(["ADMIN", "RECEPTION"], ["MANA
     }
   }
 
-  const referral = await prisma.referral.create({
-    data: {
-      doctorId: doctor.id, patientName, patientAge, patientPhone, patientGender,
-      panel: panel || null, idNumber: idNumber || null,
-      forceType: forceType || null, wardType: wardType || null,
-      ...(isCredited
-        ? {
-            status: "CREDITED",
-            fileNumber,
-            visitType,
-            arrivedAt: submitted || new Date(),
-            dischargedAt: discharged || null,
-            matchedByUserId: req.user.id,
-            ...(submitted ? { createdAt: submitted } : {}),
-          }
-        : {}),
-    },
-  });
+  const createReferralAndCredit = async (db) => {
+    if (isCredited) await assertFileNumberAvailable(db, req.user.hospitalId, canonicalFileNumber);
 
-  if (isCredited && resolvedCreditAmount !== null) {
-    await prisma.creditTransaction.create({
+    const created = await db.referral.create({
       data: {
-        doctorId: doctor.id,
-        referralId: referral.id,
-        amount: resolvedCreditAmount,
-        note: `Added by ${req.user.name} — File No. ${fileNumber}`,
-        ...(submitted ? { createdAt: submitted } : {}),
+        doctorId: doctor.id, patientName, patientAge, patientPhone, patientGender,
+        panel: panel || null, idNumber: idNumber || null,
+        forceType: forceType || null, wardType: wardType || null,
+        ...(isCredited
+          ? {
+              status: "CREDITED",
+              fileNumber: canonicalFileNumber,
+              visitType,
+              arrivedAt: submitted || new Date(),
+              dischargedAt: discharged || null,
+              matchedByUserId: req.user.id,
+              ...(submitted ? { createdAt: submitted } : {}),
+            }
+          : {}),
       },
     });
+
+    if (isCredited && resolvedCreditAmount !== null) {
+      await db.creditTransaction.create({
+        data: {
+          doctorId: doctor.id,
+          referralId: created.id,
+          amount: resolvedCreditAmount,
+          note: `Added by ${req.user.name} — File No. ${canonicalFileNumber}`,
+          ...(submitted ? { createdAt: submitted } : {}),
+        },
+      });
+    }
+    return created;
+  };
+
+  let referral;
+  try {
+    referral = isCredited ? await withFileNumberLock(req.user.hospitalId, createReferralAndCredit) : await createReferralAndCredit(prisma);
+  } catch (err) {
+    if (respondIfFileNumberConflict(err, res)) return;
+    throw err;
   }
 
   if (newLeaderCreated) {
@@ -370,8 +409,8 @@ router.get("/bulk-import/template", requireAuth, requireRole("ADMIN"), async (re
     { header: "Discharged Date", key: "dischargedDate", width: 16 },
   ];
   sheet.getRow(1).font = { bold: true };
-  sheet.addRow({ name: "Ramesh Kumar", fileNumber: "IPD-3001", age: 45, gender: "Male", phone: "9876500000", referredBy: "Dr Niraj", marketingPerson: "Munesh Rana", visitType: "IPD", panel: "CGHS", idNumber: "12345678", forceType: "Pensioner", wardType: "Semi-Private Ward", creditAmount: "", admissionDate: "", dischargedDate: "" });
-  sheet.addRow({ name: "Sunita Devi", fileNumber: "OPD-3002", age: 30, gender: "Female", phone: "", referredBy: "", marketingPerson: "", visitType: "OPD", panel: "", idNumber: "", forceType: "", wardType: "", creditAmount: "", admissionDate: "", dischargedDate: "" });
+  sheet.addRow({ name: "Ramesh Kumar", fileNumber: "IPD-3001/26-27", age: 45, gender: "Male", phone: "9876500000", referredBy: "Dr Niraj", marketingPerson: "Munesh Rana", visitType: "IPD", panel: "CGHS", idNumber: "12345678", forceType: "Pensioner", wardType: "Semi-Private Ward", creditAmount: "", admissionDate: "", dischargedDate: "" });
+  sheet.addRow({ name: "Sunita Devi", fileNumber: "OPD-3002/26-27", age: 30, gender: "Female", phone: "", referredBy: "", marketingPerson: "", visitType: "OPD", panel: "", idNumber: "", forceType: "", wardType: "", creditAmount: "", admissionDate: "", dischargedDate: "" });
 
   res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
   res.setHeader("Content-Disposition", "attachment; filename=referred-patients-bulk-import-template.xlsx");
@@ -567,18 +606,43 @@ router.post("/bulk-import", requireAuth, requireRole("ADMIN"), upload.single("fi
 
   const created = [];
   const skipped = [];
+  const seenFileNumbers = new Set(); // file numbers already taken by earlier rows of this same upload
 
   for (let rowNumber = 2; rowNumber <= sheet.rowCount; rowNumber++) {
     const row = sheet.getRow(rowNumber);
     const name = getText(row, nameCol);
-    const fileNumber = getText(row, fileNoCol);
+    const fileNumberText = getText(row, fileNoCol);
 
-    if (!name && !fileNumber) continue; // silently skip fully blank rows
+    if (!name && !fileNumberText) continue; // silently skip fully blank rows
 
-    if (!name || !fileNumber) {
+    if (!name || !fileNumberText) {
       skipped.push({ row: rowNumber, reason: !name ? "Missing name" : "Missing file number" });
       continue;
     }
+
+    // File number: fixed format (OPD-13531/26-27 / IPD-13531/26-27) and never one that's already
+    // in use — in the database or earlier in this same sheet. Checked before anything is created
+    // for the row, so a refused row leaves no stray leader or marketing person behind. A bare
+    // number ("13531") works too when the row's Visit Type is filled in: the prefix is added and
+    // the financial year is taken from the row's admission date.
+    const rowVisitType = parseVisitType(getText(row, visitTypeCol));
+    const rowSubmittedDate = parseDate(row, submittedCol);
+    const normalizedFile = normalizeFileNumber(fileNumberText, { visitType: rowVisitType || undefined, date: rowSubmittedDate || new Date() });
+    if (normalizedFile.error) {
+      skipped.push({ row: rowNumber, reason: `File number "${fileNumberText}": ${normalizedFile.error}` });
+      continue;
+    }
+    const fileNumber = normalizedFile.value;
+    if (seenFileNumbers.has(fileNumber)) {
+      skipped.push({ row: rowNumber, reason: `File number ${fileNumber} appears more than once in this sheet` });
+      continue;
+    }
+    const holder = await findFileNumberHolder(prisma, req.user.hospitalId, fileNumber);
+    if (holder) {
+      skipped.push({ row: rowNumber, reason: `File number ${fileNumber} is already used by ${holder.patientName}` });
+      continue;
+    }
+    seenFileNumbers.add(fileNumber);
 
     try {
       // Resolve the marketing person for this row (optional), matched by name or auto-created.
@@ -651,12 +715,12 @@ router.post("/bulk-import", requireAuth, requireRole("ADMIN"), upload.single("fi
       const patientAge = ageText && !Number.isNaN(Number(ageText)) ? Math.round(Number(ageText)) : 0;
       const patientGender = parseGender(getText(row, genderCol));
       const patientPhone = getText(row, phoneCol) || null;
-      const visitType = parseVisitType(getText(row, visitTypeCol));
+      const visitType = rowVisitType || normalizedFile.visitType; // a blank Visit Type is read from the file number's prefix
       const panel = normalizePanel(getText(row, panelCol));
       const idNumber = getText(row, idNumberCol) || null;
       const forceType = getText(row, forceTypeCol) || null;
       const wardType = getText(row, wardTypeCol) || null;
-      const submittedDate = parseDate(row, submittedCol);
+      const submittedDate = rowSubmittedDate;
       const dischargedDate = parseDate(row, dischargedCol);
 
       const explicitCreditText = getText(row, creditCol);
@@ -892,6 +956,42 @@ router.patch("/:id", requireAuth, requireAccess(["ADMIN", "RECEPTION"], ["MANAGE
     if (body[key] === undefined) continue;
     data[key] = typeof body[key] === "string" ? (body[key].trim() || null) : body[key];
   }
+
+  // File number: enforce the fixed format and uniqueness — but only when it's actually being
+  // changed, so a referral whose number predates the format (e.g. "IPD-9182") can still have its
+  // other fields edited. Any financial year is accepted here (an admin may be correcting an older
+  // record); only live confirmations are pinned to the current one.
+  const finalVisitType = data.visitType !== undefined ? data.visitType : referral.visitType;
+  let fileNumberToCheck = null;
+  if (data.fileNumber) {
+    const normalized = normalizeFileNumber(data.fileNumber, {
+      visitType: finalVisitType || undefined,
+      date: body.admissionDate ? new Date(body.admissionDate) : referral.createdAt,
+    });
+    if (normalized.error) return res.status(400).json({ error: normalized.error });
+    data.fileNumber = normalized.value;
+    if (normalized.value !== referral.fileNumber) fileNumberToCheck = normalized.value;
+  } else if (
+    data.visitType !== undefined &&
+    data.visitType !== referral.visitType &&
+    data.fileNumber === undefined &&
+    isCanonicalFileNumber(referral.fileNumber) &&
+    data.visitType &&
+    !referral.fileNumber.toUpperCase().startsWith(`${data.visitType}-`)
+  ) {
+    return res.status(400).json({ error: `This file number starts with "${referral.fileNumber.slice(0, 3)}-", so the visit type can't be ${data.visitType}. Change the file number too.` });
+  }
+  // Refuse a taken file number up front, before anything else (e.g. the credit amount) is saved.
+  // The save below re-checks under a lock.
+  if (fileNumberToCheck) {
+    const holder = await findFileNumberHolder(prisma, req.user.hospitalId, fileNumberToCheck, referral.id);
+    if (holder) {
+      return res.status(409).json({
+        error: `File number ${fileNumberToCheck} is already used by ${holder.patientName}${holder.doctor?.name ? ` (referred by ${holder.doctor.name})` : ""}. A file number can only be used once.`,
+        fileNumberConflict: true,
+      });
+    }
+  }
   if (body.admissionDate !== undefined) {
     // "In:" on the All Referrals list is driven by createdAt, not arrivedAt (see the bulk-import
     // and manual-add routes, which set both together for a one-step CREDITED entry) — so both
@@ -920,14 +1020,22 @@ router.patch("/:id", requireAuth, requireAccess(["ADMIN", "RECEPTION"], ["MANAGE
     return res.status(400).json({ error: "No changes provided" });
   }
 
-  const updated = await prisma.referral.update({
-    where: { id: referral.id },
-    data,
-    include: {
-      doctor: { select: { name: true, clinicName: true, phone: true, creditAmount: true, marketingPerson: { select: { id: true, name: true } } } },
-      transaction: { select: { id: true, amount: true, redeemed: true, redeemedAt: true } },
-    },
-  });
+  const updateInclude = {
+    doctor: { select: { name: true, clinicName: true, phone: true, creditAmount: true, marketingPerson: { select: { id: true, name: true } } } },
+    transaction: { select: { id: true, amount: true, redeemed: true, redeemedAt: true } },
+  };
+  let updated;
+  try {
+    updated = fileNumberToCheck
+      ? await withFileNumberLock(req.user.hospitalId, async (tx) => {
+          await assertFileNumberAvailable(tx, req.user.hospitalId, fileNumberToCheck, referral.id);
+          return tx.referral.update({ where: { id: referral.id }, data, include: updateInclude });
+        })
+      : await prisma.referral.update({ where: { id: referral.id }, data, include: updateInclude });
+  } catch (err) {
+    if (respondIfFileNumberConflict(err, res)) return;
+    throw err;
+  }
 
   logActivity({
     actor: req.user,
@@ -1178,6 +1286,11 @@ router.post("/:id/arrive", requireAuth, requireAccess(["ADMIN", "RECEPTION"], ["
   if (visitType !== "IPD" && visitType !== "OPD") {
     return res.status(400).json({ error: "Visit type must be either IPD or OPD" });
   }
+  // Fixed format: OPD-13531/26-27 / IPD-13531/26-27 — prefix from the visit type, suffix = the
+  // current financial year (see utils/fileNumber.js).
+  const normalizedFile = normalizeFileNumber(fileNumber, { visitType, requireCurrentFy: true });
+  if (normalizedFile.error) return res.status(400).json({ error: normalizedFile.error });
+  const finalFileNumber = normalizedFile.value;
 
   const referral = await prisma.referral.findFirst({
     where: { id: req.params.id, doctor: { hospitalId: req.user.hospitalId } },
@@ -1231,30 +1344,40 @@ router.post("/:id/arrive", requireAuth, requireAccess(["ADMIN", "RECEPTION"], ["
   });
   const amount = visitType === "IPD" ? hospital.ipdAmount : hospital.opdAmount;
 
-  const result = await prisma.$transaction(async (tx) => {
-    const updated = await tx.referral.update({
-      where: { id: referral.id },
-      data: {
-        status: "CREDITED",
-        arrivedAt: new Date(),
-        matchedByUserId: req.user.id,
-        fileNumber: String(fileNumber).trim(),
-        visitType,
-        idNumber: finalIdNumber,
-      },
-    });
+  let result;
+  try {
+    // The duplicate check and the save happen under a per-hospital lock, so a file number can
+    // never be admitted twice — not even by two people confirming at the same instant.
+    result = await withFileNumberLock(req.user.hospitalId, async (tx) => {
+      await assertFileNumberAvailable(tx, req.user.hospitalId, finalFileNumber, referral.id);
 
-    const transaction = await tx.creditTransaction.create({
-      data: {
-        doctorId: referral.doctorId,
-        referralId: referral.id,
-        amount,
-        note: `Confirmed by ${req.user.name} — ${visitType} — File No. ${String(fileNumber).trim()}`,
-      },
-    });
+      const updated = await tx.referral.update({
+        where: { id: referral.id },
+        data: {
+          status: "CREDITED",
+          arrivedAt: new Date(),
+          matchedByUserId: req.user.id,
+          fileNumber: finalFileNumber,
+          visitType,
+          idNumber: finalIdNumber,
+        },
+      });
 
-    return { updated, transaction };
-  });
+      const transaction = await tx.creditTransaction.create({
+        data: {
+          doctorId: referral.doctorId,
+          referralId: referral.id,
+          amount,
+          note: `Confirmed by ${req.user.name} — ${visitType} — File No. ${finalFileNumber}`,
+        },
+      });
+
+      return { updated, transaction };
+    });
+  } catch (err) {
+    if (respondIfFileNumberConflict(err, res)) return;
+    throw err;
+  }
 
   logActivity({
     actor: req.user,
@@ -1262,7 +1385,7 @@ router.post("/:id/arrive", requireAuth, requireAccess(["ADMIN", "RECEPTION"], ["
     entityType: "Referral",
     entityId: referral.id,
     entityLabel: referral.patientName,
-    metadata: { visitType, fileNumber: String(fileNumber).trim(), amount: Number(amount), doctorName: referral.doctor.name },
+    metadata: { visitType, fileNumber: finalFileNumber, amount: Number(amount), doctorName: referral.doctor.name },
   });
 
   notify({
@@ -1286,6 +1409,9 @@ router.post("/:id/convert-to-ipd", requireAuth, requireAccess(["ADMIN", "RECEPTI
   if (!fileNumber || !String(fileNumber).trim()) {
     return res.status(400).json({ error: "The new IPD file number is required to convert this lead" });
   }
+  const normalizedFile = normalizeFileNumber(fileNumber, { visitType: "IPD", requireCurrentFy: true });
+  if (normalizedFile.error) return res.status(400).json({ error: normalizedFile.error });
+  const finalFileNumber = normalizedFile.value;
 
   const referral = await prisma.referral.findFirst({
     where: { id: req.params.id, doctor: { hospitalId: req.user.hospitalId } },
@@ -1311,12 +1437,16 @@ router.post("/:id/convert-to-ipd", requireAuth, requireAccess(["ADMIN", "RECEPTI
   const previousAmount = referral.transaction ? Number(referral.transaction.amount) : 0;
   const newAmount = Number(hospital.ipdAmount);
 
-  const result = await prisma.$transaction(async (tx) => {
+  let result;
+  try {
+   result = await withFileNumberLock(req.user.hospitalId, async (tx) => {
+    await assertFileNumberAvailable(tx, req.user.hospitalId, finalFileNumber, referral.id);
+
     const updated = await tx.referral.update({
       where: { id: referral.id },
       data: {
         visitType: "IPD",
-        fileNumber: String(fileNumber).trim(),
+        fileNumber: finalFileNumber,
         convertedAt: new Date(),
       },
     });
@@ -1326,7 +1456,7 @@ router.post("/:id/convert-to-ipd", requireAuth, requireAccess(["ADMIN", "RECEPTI
           where: { id: referral.transaction.id },
           data: {
             amount: newAmount,
-            note: `${referral.transaction.note || ""} | Converted OPD→IPD by ${req.user.name}: ${previousAmount.toFixed(2)} → ${newAmount.toFixed(2)} pts, file no. ${String(fileNumber).trim()}`,
+            note: `${referral.transaction.note || ""} | Converted OPD→IPD by ${req.user.name}: ${previousAmount.toFixed(2)} → ${newAmount.toFixed(2)} pts, file no. ${finalFileNumber}`,
           },
         })
       : await tx.creditTransaction.create({
@@ -1334,12 +1464,16 @@ router.post("/:id/convert-to-ipd", requireAuth, requireAccess(["ADMIN", "RECEPTI
             doctorId: referral.doctorId,
             referralId: referral.id,
             amount: newAmount,
-            note: `Converted OPD→IPD by ${req.user.name} — File No. ${String(fileNumber).trim()}`,
+            note: `Converted OPD→IPD by ${req.user.name} — File No. ${finalFileNumber}`,
           },
         });
 
     return { updated, transaction };
-  });
+   });
+  } catch (err) {
+    if (respondIfFileNumberConflict(err, res)) return;
+    throw err;
+  }
 
   logActivity({
     actor: req.user,
@@ -1348,7 +1482,7 @@ router.post("/:id/convert-to-ipd", requireAuth, requireAccess(["ADMIN", "RECEPTI
     entityId: referral.id,
     entityLabel: referral.patientName,
     changes: { amount: { from: previousAmount, to: newAmount }, visitType: { from: "OPD", to: "IPD" } },
-    metadata: { fileNumber: String(fileNumber).trim() },
+    metadata: { fileNumber: finalFileNumber },
   });
 
   res.json(result);

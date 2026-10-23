@@ -62,6 +62,11 @@ export default function BulkImportReferralsModal({ onClose, onImported }) {
             Referred By, Marketing Person, Visit Type, Panel, Credit Amount, Submitted Date, and Discharged Date
             are all optional. Rows are imported as <strong>Credited</strong>.
           </p>
+          <p style={{ fontSize: 13, color: "var(--ink-soft)", marginTop: -6 }}>
+            File numbers must be in the format <strong>IPD-13531/26-27</strong> or <strong>OPD-13531/26-27</strong>, and each
+            number can be used only once — rows with a different format, or a number that is already in use, are skipped
+            and listed after the import.
+          </p>
 
           <button type="button" className="secondary" style={{ width: "auto", padding: "8px 14px", marginBottom: 16 }} onClick={downloadTemplate}>
             <Download size={15} />Download template

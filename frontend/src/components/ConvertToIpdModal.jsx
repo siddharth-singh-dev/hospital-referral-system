@@ -2,13 +2,16 @@ import { useEffect, useState } from "react";
 import { ArrowUpCircle } from "lucide-react";
 import Modal from "./Modal";
 import api from "../api/client";
+import FileNumberInput from "./FileNumberInput";
+import { buildFileNumber, financialYearLabel } from "../utils/fileNumber";
 
 // Used when an OPD lead later gets admitted. Reception enters the new IPD file number;
 // the doctor's credit is bumped from the OPD amount up to the (admin-fixed) IPD amount.
 export default function ConvertToIpdModal({ patientName, doctorName, currentAmount, onClose, onConvert }) {
   const [ipdAmount, setIpdAmount] = useState(null);
   const [loadingAmount, setLoadingAmount] = useState(true);
-  const [fileNumber, setFileNumber] = useState("");
+  const [fileNumber, setFileNumber] = useState(""); // just the digits — prefix and financial year are fixed
+  const fy = financialYearLabel();
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
 
@@ -34,7 +37,7 @@ export default function ConvertToIpdModal({ patientName, doctorName, currentAmou
     }
     setSubmitting(true);
     try {
-      await onConvert({ fileNumber: fileNumber.trim() });
+      await onConvert({ fileNumber: buildFileNumber("IPD", fileNumber, fy) });
     } catch (err) {
       setError(err?.response?.data?.error || "Failed to convert this lead to IPD.");
       setSubmitting(false);
@@ -49,7 +52,7 @@ export default function ConvertToIpdModal({ patientName, doctorName, currentAmou
         </p>
 
         <label>New IPD file number</label>
-        <input value={fileNumber} onChange={(e) => setFileNumber(e.target.value)} placeholder="e.g. IPD-00123" autoFocus required />
+        <FileNumberInput visitType="IPD" value={fileNumber} onChange={setFileNumber} fy={fy} autoFocus required />
 
         <p style={{ fontSize: 13, color: "var(--ink-soft)" }}>
           {loadingAmount
