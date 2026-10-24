@@ -376,7 +376,7 @@ export default function StaffPortal() {
                 <tbody>
                   {referrals.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE).map((r) => (
                     <tr key={r.id} style={r.status === "CREDITED" && r.dischargedAt ? { background: "#fef3c7" } : undefined}>
-                      <td>{r.patientName}{r.attachmentPath && <AttachmentIcon referralId={r.id} />}{r.extraAttachmentPath && <AttachmentIcon referralId={r.id} kind="extra" />}<LeadNote text={r.leadNote} messageCount={r._count?.messages || 0} onReply={() => setThreadFor(r)} /><MissingDetails referral={r} /></td>
+                      <td>{r.patientName}{r.attachmentPath && <AttachmentIcon referralId={r.id} />}{r.extraAttachmentPath && <AttachmentIcon referralId={r.id} kind="extra" />}<LeadNote text={r.leadNote} messageCount={r._count?.messages || 0} unreadCount={r.unreadReplyCount || 0} onReply={() => setThreadFor(r)} /><MissingDetails referral={r} /></td>
                       <td>{r.fileNumber || "—"}</td>
                       <td>{r.patientAge ?? "—"}</td>
                       <td>{r.patientGender ? r.patientGender.charAt(0) + r.patientGender.slice(1).toLowerCase() : "—"}</td>
@@ -500,7 +500,7 @@ export default function StaffPortal() {
           onConvert={handleConvertToIpd}
         />
       )}
-      {threadFor && <ReferralThreadModal referral={threadFor} viewer="STAFF" onClose={() => setThreadFor(null)} onChanged={load} />}
+      {threadFor && <ReferralThreadModal referral={threadFor} viewer="STAFF" onClose={() => { setThreadFor(null); load(); }} onChanged={load} />}
       {editReferralModal && (
         <EditReferralModal
           referral={editReferralModal}

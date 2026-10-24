@@ -9,6 +9,12 @@ export function formatDate(date) {
   return `${dd}/${mm}/${yy}`;
 }
 
+// "3:45 pm" — just the time of day, for showing under a date. Empty for a missing date.
+export function formatTime(date) {
+  if (!date) return "";
+  return new Date(date).toLocaleTimeString("en-IN", { hour: "numeric", minute: "2-digit", hour12: true }).toLowerCase();
+}
+
 export function formatDateTime(date) {
   if (!date) return "—";
   const d = new Date(date);

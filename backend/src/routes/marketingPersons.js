@@ -497,6 +497,8 @@ router.get("/public/me/leads", requireAuth, requireRole("MARKETING"), async (req
       visitType: true,
       dischargedAt: true,
       createdAt: true,
+      arrivedAt: true,
+      importBatchId: true,
       doctor: { select: { name: true } },
     },
   });
@@ -520,6 +522,10 @@ router.get("/public/me/leads", requireAuth, requireRole("MARKETING"), async (req
       cardType: r.idType,
       panel: r.panel,
       submittedAt: r.createdAt,
+      // When it was admitted. Rows from an Excel bulk import only carry a date, not a real time
+      // of day, so the portal is told not to show a time for them.
+      admittedAt: r.status === "CREDITED" ? r.arrivedAt : null,
+      hasTime: !r.importBatchId,
       messageCount: threadSizeById.get(r.id) || 0,
       unreadReplyCount: unreadById.get(r.id) || 0,
       // what the lead already carries, and whether it can still be added to (see POST /referrals/:id/marketing-update)

@@ -8,7 +8,7 @@ import {
 } from "lucide-react";
 import { ResponsiveContainer, AreaChart, Area, XAxis, YAxis, Tooltip, CartesianGrid, BarChart, Bar, Cell, PieChart, Pie, Legend } from "recharts";
 import api from "../api/client";
-import { formatDate, formatDateTime, formatShortDate } from "../utils/date";
+import { formatDate, formatDateTime, formatShortDate, formatTime } from "../utils/date";
 import Sidebar from "../components/Sidebar";
 import DateRangePicker from "../components/DateRangePicker";
 import Avatar from "../components/Avatar";
@@ -1885,7 +1885,7 @@ export default function AdminDashboard() {
                           {duplicatesOnly && <span className="chip pending" style={{ marginLeft: 6, background: "#fee2e2", color: "#991b1b" }}>Duplicate</span>}
                           {r.patientPhone ? ` · ${r.patientPhone}` : ""}
                         </div>
-                        <LeadNote text={r.leadNote} messageCount={r._count?.messages || 0} canStart={Boolean(r.doctor?.marketingPerson)} onReply={() => setThreadFor(r)} />
+                        <LeadNote text={r.leadNote} messageCount={r._count?.messages || 0} unreadCount={r.unreadReplyCount || 0} canStart={Boolean(r.doctor?.marketingPerson)} onReply={() => setThreadFor(r)} />
                         <MissingDetails referral={r} />
                       </td>
                       <td>
@@ -1927,7 +1927,15 @@ export default function AdminDashboard() {
                       </td>
                       <td>
                         <div className="cell-secondary">In: {formatDate(r.createdAt)}</div>
-                        {r.dischargedAt && <div className="cell-secondary">Out: {formatDate(r.dischargedAt)}</div>}
+                        {!r.importBatchId && <div className="cell-secondary">{formatTime(r.createdAt)}</div>}
+                        {/* when reception admitted it — only when that's a different moment from "In" and a real time of day (bulk-imported rows only carry a date) */}
+                        {r.status === "CREDITED" && r.arrivedAt && !r.importBatchId && new Date(r.arrivedAt).getTime() !== new Date(r.createdAt).getTime() && (
+                          <>
+                            <div className="cell-secondary" style={{ marginTop: 4 }}>Admitted: {formatDate(r.arrivedAt)}</div>
+                            <div className="cell-secondary">{formatTime(r.arrivedAt)}</div>
+                          </>
+                        )}
+                        {r.dischargedAt && <div className="cell-secondary" style={{ marginTop: 4 }}>Out: {formatDate(r.dischargedAt)}</div>}
                       </td>
                       <td>
                         {r.scanLatitude != null ? (
@@ -2129,7 +2137,7 @@ export default function AdminDashboard() {
           onClose={() => setMarketingQr(null)}
         />
       )}
-      {threadFor && <ReferralThreadModal referral={threadFor} viewer="STAFF" onClose={() => setThreadFor(null)} onChanged={loadReferrals} />}
+      {threadFor && <ReferralThreadModal referral={threadFor} viewer="STAFF" onClose={() => { setThreadFor(null); loadReferrals(); }} onChanged={loadReferrals} />}
       {showAddPatient && (
         <AddPatientModal
           onClose={() => setShowAddPatient(false)}

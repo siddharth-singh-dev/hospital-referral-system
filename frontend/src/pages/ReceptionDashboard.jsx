@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Search, CheckCircle2, XCircle, MapPin, ChevronLeft, ChevronRight, ArrowUpCircle, UserPlus, LogOut, IdCard, Pencil, ClipboardList } from "lucide-react";
 import api from "../api/client";
-import { formatDate } from "../utils/date";
+import { formatDate, formatTime } from "../utils/date";
 import DateRangePicker from "../components/DateRangePicker";
 import ConfirmLeadModal from "../components/ConfirmLeadModal";
 import ConvertToIpdModal from "../components/ConvertToIpdModal";
@@ -301,7 +301,7 @@ export default function ReceptionDashboard() {
                         {r.fileNumber ? ` · ${r.fileNumber}` : ""}
                         {r.patientPhone ? ` · ${r.patientPhone}` : ""}
                       </div>
-                      <LeadNote text={r.leadNote} messageCount={r._count?.messages || 0} canStart={Boolean(r.doctor?.marketingPerson)} onReply={() => setThreadFor(r)} />
+                      <LeadNote text={r.leadNote} messageCount={r._count?.messages || 0} unreadCount={r.unreadReplyCount || 0} canStart={Boolean(r.doctor?.marketingPerson)} onReply={() => setThreadFor(r)} />
                         <MissingDetails referral={r} />
                     </td>
                     <td>
@@ -338,7 +338,15 @@ export default function ReceptionDashboard() {
                     </td>
                     <td>
                       <div className="cell-secondary">In: {formatDate(r.createdAt)}</div>
-                      {r.dischargedAt && <div className="cell-secondary">Out: {formatDate(r.dischargedAt)}</div>}
+                      {!r.importBatchId && <div className="cell-secondary">{formatTime(r.createdAt)}</div>}
+                      {/* when reception admitted it — only when that's a different moment from "In" and a real time of day (bulk-imported rows only carry a date) */}
+                      {r.status === "CREDITED" && r.arrivedAt && !r.importBatchId && new Date(r.arrivedAt).getTime() !== new Date(r.createdAt).getTime() && (
+                        <>
+                          <div className="cell-secondary" style={{ marginTop: 4 }}>Admitted: {formatDate(r.arrivedAt)}</div>
+                          <div className="cell-secondary">{formatTime(r.arrivedAt)}</div>
+                        </>
+                      )}
+                      {r.dischargedAt && <div className="cell-secondary" style={{ marginTop: 4 }}>Out: {formatDate(r.dischargedAt)}</div>}
                     </td>
                     <td>
                       {r.scanLatitude != null ? (
@@ -425,7 +433,7 @@ export default function ReceptionDashboard() {
           onConvert={handleConvertToIpd}
         />
       )}
-      {threadFor && <ReferralThreadModal referral={threadFor} viewer="STAFF" onClose={() => setThreadFor(null)} onChanged={load} />}
+      {threadFor && <ReferralThreadModal referral={threadFor} viewer="STAFF" onClose={() => { setThreadFor(null); load(); }} onChanged={load} />}
       {showAddPatient && (
         <AddPatientModal
           onClose={() => setShowAddPatient(false)}

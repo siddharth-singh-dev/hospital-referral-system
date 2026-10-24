@@ -72,10 +72,13 @@ router.get("/:id/messages", requireAuth, async (req, res) => {
     orderBy: [{ createdAt: "asc" }, { id: "asc" }],
   });
 
-  // Opening the thread is what clears the marketing person's "unread reply" badge.
-  if (access.as === "MARKETING" && messages.some((m) => m.senderType === "STAFF" && !m.readAt)) {
+  // Opening the thread clears the "new" badge for the side that just read it: the marketing
+  // person clears hospital replies; a staff member who can reply (not a view-only one — they
+  // shouldn't hide it from reception) clears the marketing person's replies for everyone.
+  const unreadSide = access.as === "MARKETING" ? "STAFF" : access.as === "STAFF" && access.canReply ? "MARKETING" : null;
+  if (unreadSide && messages.some((m) => m.senderType === unreadSide && !m.readAt)) {
     await prisma.referralMessage.updateMany({
-      where: { referralId: referral.id, senderType: "STAFF", readAt: null },
+      where: { referralId: referral.id, senderType: unreadSide, readAt: null },
       data: { readAt: new Date() },
     });
   }

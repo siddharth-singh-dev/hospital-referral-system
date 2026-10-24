@@ -94,8 +94,9 @@ model ReferralMessage {
   body         String   @db.VarChar(500)
   createdAt    DateTime @default(now())
 
-  // Only used for STAFF messages: set when the marketing person opens the thread, so their
-  // portal can show an "unread reply" badge until they've seen it.
+  // Set when the other side opens the thread, so a red "new" badge shows until then:
+  //   STAFF message     -> read when the marketing person opens it
+  //   MARKETING message -> read when a staff member who can reply opens it (clears for the whole hospital)
   readAt       DateTime?
 
   @@index([referralId, createdAt])

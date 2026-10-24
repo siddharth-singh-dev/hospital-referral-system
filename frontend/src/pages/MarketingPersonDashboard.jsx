@@ -10,6 +10,7 @@ import LeadUpdateModal from "../components/LeadUpdateModal";
 import ReferralThreadModal from "../components/ReferralThreadModal";
 import { pairError, panelOptionsForCard, cardOptionsForPanel } from "../utils/cardPanelRules";
 import { PANEL_OPTIONS } from "../utils/panels";
+import { formatTime } from "../utils/date";
 
 const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:4000/api";
 
@@ -490,9 +491,15 @@ export default function MarketingPersonDashboard() {
                           {l.note && <div style={{ color: "var(--ink-soft)", fontSize: 11.5, marginTop: 2, wordBreak: "break-word" }}>{l.note}</div>}
                         </div>
                         <div style={{ textAlign: "right" }}>
-                          <span style={{ color: "var(--ink-soft)", fontSize: 12 }}>
+                          <div style={{ color: "var(--ink-soft)", fontSize: 12 }}>
                             {new Date(l.submittedAt).toLocaleDateString("en-IN", { day: "2-digit", month: "short" })}
-                          </span>
+                          </div>
+                          {l.hasTime && <div style={{ color: "var(--ink-soft)", fontSize: 11.5 }}>{formatTime(l.submittedAt)}</div>}
+                          {l.admittedAt && l.hasTime && (
+                            <div style={{ color: "#166534", fontSize: 11.5, marginTop: 3 }}>
+                              Admitted {new Date(l.admittedAt).toLocaleDateString("en-IN", { day: "2-digit", month: "short" })}, {formatTime(l.admittedAt)}
+                            </div>
+                          )}
                           {l.messageCount > 0 && (
                             // opens the conversation with reception; the red count is replies not opened yet
                             <button

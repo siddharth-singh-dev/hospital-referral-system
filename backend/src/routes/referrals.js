@@ -1106,7 +1106,19 @@ router.get("/", requireAuth, requireAccess(["ADMIN", "RECEPTION"], ["VIEW_REFERR
     prisma.referral.count({ where }),
   ]);
 
-  res.json({ referrals, total, page, pageSize, ...(duplicateNumbers !== undefined ? { duplicateNumbers } : {}) });
+  // How many replies from the marketing person on each lead no staff member has opened yet — drives
+  // the red "new" badge next to the Reply / Conversation button.
+  const unreadRows = referrals.length
+    ? await prisma.referralMessage.groupBy({
+        by: ["referralId"],
+        where: { referralId: { in: referrals.map((r) => r.id) }, senderType: "MARKETING", readAt: null },
+        _count: { _all: true },
+      })
+    : [];
+  const unreadById = new Map(unreadRows.map((g) => [g.referralId, g._count._all]));
+  const withUnread = referrals.map((r) => ({ ...r, unreadReplyCount: unreadById.get(r.id) || 0 }));
+
+  res.json({ referrals: withUnread, total, page, pageSize, ...(duplicateNumbers !== undefined ? { duplicateNumbers } : {}) });
 });
 
 // GET /api/referrals/status-counts  (reception + admin, same access as the list above) —
