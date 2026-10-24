@@ -79,6 +79,28 @@ model Notification {
 }
 
 // One row per (notification, user who has seen it). Absence of a row = unread for that user.
+// A short back-and-forth about one lead between reception/admin/staff and the marketing person
+// who sent it ("which ward does he want?" / "private room, same as last time"). The marketing
+// person's original note still lives in Referral.leadNote — this is everything said after it.
+// Internal only: never shown on a leader's public dashboard.
+model ReferralMessage {
+  id           String   @id @default(uuid())
+  referralId   String
+  referral     Referral @relation(fields: [referralId], references: [id], onDelete: Cascade)
+
+  senderType   String   // "STAFF" (admin / reception / staff) | "MARKETING"
+  senderUserId String?
+  senderName   String   // copied at send time, so it still reads right if the account is renamed or removed
+  body         String   @db.VarChar(500)
+  createdAt    DateTime @default(now())
+
+  // Only used for STAFF messages: set when the marketing person opens the thread, so their
+  // portal can show an "unread reply" badge until they've seen it.
+  readAt       DateTime?
+
+  @@index([referralId, createdAt])
+}
+
 model NotificationRead {
   id             String       @id @default(uuid())
   notificationId String
@@ -290,6 +312,7 @@ model Referral {
   createdAt       DateTime       @default(now())
 
   transaction     CreditTransaction?
+  messages        ReferralMessage[]
 }
 
 // One row per "Bulk import" Excel upload on the All Referrals tab. Lets an admin see the

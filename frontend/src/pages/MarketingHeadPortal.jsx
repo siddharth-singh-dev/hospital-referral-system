@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Navigate, useNavigate } from "react-router-dom";
 import { RefreshCw } from "lucide-react";
 import api from "../api/client";
+import ReferralThreadModal from "../components/ReferralThreadModal";
 import { formatDate, formatDateTime } from "../utils/date";
 import { STAGE_META, LEAD_FILTERS } from "../utils/leadStages";
 
@@ -33,6 +34,7 @@ export default function MarketingHeadPortal() {
 
   const [overview, setOverview] = useState(null);
   const [leads, setLeads] = useState([]);
+  const [threadFor, setThreadFor] = useState(null); // lead whose conversation is open (read-only for a team head)
   const [memberId, setMemberId] = useState(""); // "" = the whole team
   const [filter, setFilter] = useState("ALL");
   const [search, setSearch] = useState("");
@@ -206,6 +208,9 @@ export default function MarketingHeadPortal() {
                             <td style={{ whiteSpace: "normal" }}>
                               <span className="badge" style={{ background: meta.bg, color: meta.color }}>{l.label}</span>
                               {l.note && <div style={{ fontSize: 12, color: "var(--ink-soft)", marginTop: 2 }}>{l.note}</div>}
+                              {l.messageCount > 0 && (
+                                <button type="button" className="thread-link" onClick={() => setThreadFor(l)}>Notes ({l.messageCount})</button>
+                              )}
                             </td>
                             <td>{formatDate(l.submittedAt)}</td>
                           </tr>
@@ -220,6 +225,7 @@ export default function MarketingHeadPortal() {
           </>
         )}
       </div>
+      {threadFor && <ReferralThreadModal referral={threadFor} viewer="HEAD" onClose={() => setThreadFor(null)} />}
     </div>
   );
 }

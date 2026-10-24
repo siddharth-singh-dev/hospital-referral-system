@@ -1061,7 +1061,28 @@ router.patch("/:id", requireAuth, requireAccess(["ADMIN", "RECEPTION"], ["MANAGE
 router.get("/", requireAuth, requireAccess(["ADMIN", "RECEPTION"], ["VIEW_REFERRALS", "MANAGE_REFERRALS"]), async (req, res) => {
   const page = Math.max(1, parseInt(req.query.page, 10) || 1);
   const pageSize = Math.min(200, Math.max(1, parseInt(req.query.pageSize, 10) || 50));
-  const where = buildWhere(req);
+
+  // Admin-only "duplicate file numbers" view: every referral whose file number is used by two or
+  // more referrals in this hospital, grouped together by file number. It deliberately ignores the
+  // other filters (date, doctor, status, search) — otherwise a date range could hide one of the
+  // pair and the duplicate would look like a single, normal row.
+  let where;
+  let orderBy = [{ createdAt: "desc" }, { id: "desc" }];
+  let duplicateNumbers;
+  if (req.query.duplicateFileNumbers === "true") {
+    if (req.user.role !== "ADMIN") return res.status(403).json({ error: "Only an admin can use the duplicate file number filter" });
+    const groups = await prisma.referral.groupBy({
+      by: ["fileNumber"],
+      where: { fileNumber: { not: null }, doctor: { hospitalId: req.user.hospitalId } },
+      _count: { _all: true },
+      having: { fileNumber: { _count: { gt: 1 } } },
+    });
+    duplicateNumbers = groups.length;
+    where = { doctor: { hospitalId: req.user.hospitalId }, fileNumber: { in: groups.map((g) => g.fileNumber) } };
+    orderBy = [{ fileNumber: "asc" }, { createdAt: "asc" }, { id: "asc" }];
+  } else {
+    where = buildWhere(req);
+  }
 
   const [referrals, total] = await Promise.all([
     prisma.referral.findMany({
@@ -1069,6 +1090,7 @@ router.get("/", requireAuth, requireAccess(["ADMIN", "RECEPTION"], ["VIEW_REFERR
       include: {
         doctor: { select: { name: true, clinicName: true, phone: true, creditAmount: true, marketingPerson: { select: { id: true, name: true } } } },
         transaction: { select: { id: true, amount: true, redeemed: true, redeemedAt: true } },
+        _count: { select: { messages: true } }, // size of the note thread, for the reply button
       },
       // createdAt alone isn't unique — bulk imports routinely give many rows the exact same
       // timestamp (e.g. a batch of patients sharing one admission date). Without a tiebreaker,
@@ -1077,14 +1099,14 @@ router.get("/", requireAuth, requireAccess(["ADMIN", "RECEPTION"], ["VIEW_REFERR
       // even though a direct, non-paginated search still finds them fine) and can duplicate
       // others. `id` is always unique, so adding it as a secondary sort key makes the order
       // fully deterministic no matter how many rows share a createdAt.
-      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+      orderBy,
       skip: (page - 1) * pageSize,
       take: pageSize,
     }),
     prisma.referral.count({ where }),
   ]);
 
-  res.json({ referrals, total, page, pageSize });
+  res.json({ referrals, total, page, pageSize, ...(duplicateNumbers !== undefined ? { duplicateNumbers } : {}) });
 });
 
 // GET /api/referrals/status-counts  (reception + admin, same access as the list above) —

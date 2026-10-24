@@ -501,6 +501,17 @@ router.get("/public/me/leads", requireAuth, requireRole("MARKETING"), async (req
     },
   });
 
+  // Size of each lead's note thread, and how many staff replies this person hasn't opened yet.
+  const leadIds = referrals.map((r) => r.id);
+  const [threadSizes, unreadReplies] = leadIds.length
+    ? await Promise.all([
+        prisma.referralMessage.groupBy({ by: ["referralId"], where: { referralId: { in: leadIds } }, _count: { _all: true } }),
+        prisma.referralMessage.groupBy({ by: ["referralId"], where: { referralId: { in: leadIds }, senderType: "STAFF", readAt: null }, _count: { _all: true } }),
+      ])
+    : [[], []];
+  const threadSizeById = new Map(threadSizes.map((g) => [g.referralId, g._count._all]));
+  const unreadById = new Map(unreadReplies.map((g) => [g.referralId, g._count._all]));
+
   res.json(
     referrals.map((r) => ({
       id: r.id,
@@ -509,6 +520,8 @@ router.get("/public/me/leads", requireAuth, requireRole("MARKETING"), async (req
       cardType: r.idType,
       panel: r.panel,
       submittedAt: r.createdAt,
+      messageCount: threadSizeById.get(r.id) || 0,
+      unreadReplyCount: unreadById.get(r.id) || 0,
       // what the lead already carries, and whether it can still be added to (see POST /referrals/:id/marketing-update)
       leadNote: r.leadNote,
       hasCardPhoto: Boolean(r.attachmentPath),
@@ -605,9 +618,16 @@ router.get("/team/leads", ...teamHeadAccess, async (req, res) => {
     },
   });
 
+  const headLeadIds = referrals.map((r) => r.id);
+  const headThreadSizes = headLeadIds.length
+    ? await prisma.referralMessage.groupBy({ by: ["referralId"], where: { referralId: { in: headLeadIds } }, _count: { _all: true } })
+    : [];
+  const headThreadSizeById = new Map(headThreadSizes.map((g) => [g.referralId, g._count._all]));
+
   res.json(
     referrals.map((r) => ({
       id: r.id,
+      messageCount: headThreadSizeById.get(r.id) || 0,
       patientName: r.patientName,
       leaderName: r.doctor.name,
       memberId: r.doctor.marketingPerson?.id,

@@ -4,7 +4,7 @@ import {
   LayoutDashboard, Stethoscope, Users, ClipboardList, Plus, Power,
   Wallet, Trash2, KeyRound, Download, Search, CheckCircle2,
   XCircle, MapPin, X, ChevronUp, ChevronDown, ChevronLeft, ChevronRight,
-  Eye, TrendingUp, IndianRupee, UserCheck, Clock, Award, ArrowUpCircle, RotateCcw, Upload, LogOut, UserPlus, Pencil, Megaphone, QrCode, History, IdCard,
+  Eye, TrendingUp, IndianRupee, UserCheck, Clock, Award, ArrowUpCircle, RotateCcw, Upload, LogOut, UserPlus, Pencil, Megaphone, QrCode, History, IdCard, Copy,
 } from "lucide-react";
 import { ResponsiveContainer, AreaChart, Area, XAxis, YAxis, Tooltip, CartesianGrid, BarChart, Bar, Cell, PieChart, Pie, Legend } from "recharts";
 import api from "../api/client";
@@ -26,6 +26,7 @@ import EditReferralModal from "../components/EditReferralModal";
 import MarketingPersonReferralsModal from "../components/MarketingPersonReferralsModal";
 import AttachmentIcon from "../components/AttachmentIcon";
 import LeadNote from "../components/LeadNote";
+import ReferralThreadModal from "../components/ReferralThreadModal";
 import MissingDetails from "../components/MissingDetails";
 import AdmissionFilter from "../components/AdmissionFilter";
 import MergeMarketingPersonsModal from "../components/MergeMarketingPersonsModal";
@@ -126,6 +127,11 @@ export default function AdminDashboard() {
   const [referralSearch, setReferralSearch] = useState("");
   const [referralDoctorId, setReferralDoctorId] = useState("");
   const [unpaidOnly, setUnpaidOnly] = useState(false);
+  // "Duplicate file numbers" view: only referrals whose file number is shared with another referral.
+  // While it's on, the other filters and status tabs are ignored (the server does the same).
+  const [duplicatesOnly, setDuplicatesOnly] = useState(false);
+  const [duplicateNumbers, setDuplicateNumbers] = useState(0); // how many different file numbers are duplicated
+  const [threadFor, setThreadFor] = useState(null); // referral whose note conversation is open
   const [dischargeStatus, setDischargeStatus] = useState(""); // "" | "admitted" | "discharged" — only used on the Admitted tab
   const [bulkRedeeming, setBulkRedeeming] = useState(false);
   const [referralDateFrom, setReferralDateFrom] = useState("");
@@ -239,12 +245,14 @@ export default function AdminDashboard() {
         to: referralDateTo || undefined,
         unpaidOnly: unpaidOnly || undefined,
         dischargeStatus: dischargeStatus || undefined,
+        duplicateFileNumbers: duplicatesOnly || undefined,
         page: referralPage,
         pageSize: REFERRALS_PAGE_SIZE,
       },
     });
     setReferrals(data.referrals);
     setReferralTotal(data.total);
+    setDuplicateNumbers(data.duplicateNumbers ?? 0);
   }
 
   async function loadReferralStatusCounts() {
@@ -335,8 +343,8 @@ export default function AdminDashboard() {
   }, []);
   useEffect(() => { if (activeTab === "All Referrals") loadReferralStatusCounts(); }, [referrals.length]);
   useEffect(() => { if (activeTab === "Marketing") loadMarketingList(); }, [activeTab]);
-  useEffect(() => { if (activeTab === "All Referrals") setReferralPage(1); }, [activeTab, referralTab, referralDoctorId, referralDateFrom, referralDateTo, unpaidOnly, dischargeStatus]);
-  useEffect(() => { if (activeTab === "All Referrals") loadReferrals(); }, [activeTab, referralTab, referralDoctorId, referralDateFrom, referralDateTo, unpaidOnly, dischargeStatus, referralPage]);
+  useEffect(() => { if (activeTab === "All Referrals") setReferralPage(1); }, [activeTab, referralTab, referralDoctorId, referralDateFrom, referralDateTo, unpaidOnly, dischargeStatus, duplicatesOnly]);
+  useEffect(() => { if (activeTab === "All Referrals") loadReferrals(); }, [activeTab, referralTab, referralDoctorId, referralDateFrom, referralDateTo, unpaidOnly, dischargeStatus, duplicatesOnly, referralPage]);
   // These two only exist on the Admitted tab. Left switched on, they'd silently hide every row on the other tabs
   // (a Pending lead has no credit and no discharge date), with the controls out of sight.
   useEffect(() => { if (referralTab !== "CREDITED") { setDischargeStatus(""); setUnpaidOnly(false); } }, [referralTab]);
@@ -1753,9 +1761,9 @@ export default function AdminDashboard() {
                 {REFERRAL_TABS.map((t) => (
                   <button
                     key={t.key}
-                    className={`tab-btn ${referralTab === t.key ? "" : "secondary"}`}
+                    className={`tab-btn ${referralTab === t.key && !duplicatesOnly ? "" : "secondary"}`}
                     style={{ width: "auto" }}
-                    onClick={() => setReferralTab(t.key)}
+                    onClick={() => { setDuplicatesOnly(false); setReferralTab(t.key); }}
                   >
                     {t.label}
                     {t.key === "CARD_REVIEW" && referralStatusCounts.CARD_REVIEW > 0 && (
@@ -1772,7 +1780,15 @@ export default function AdminDashboard() {
                   </button>
                 ))}
               </div>
-              <div style={{ display: "flex", gap: 8 }}>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                <button
+                  className={duplicatesOnly ? "" : "secondary"}
+                  style={{ width: "auto", padding: "6px 14px" }}
+                  onClick={() => setDuplicatesOnly((on) => !on)}
+                  title="Show only referrals whose file number is used by more than one patient"
+                >
+                  <Copy size={14} />Duplicate file numbers
+                </button>
                 <button style={{ width: "auto", padding: "6px 14px" }} onClick={() => setShowAddPatient(true)}><UserPlus size={14} />Add patient</button>
                 <button className="secondary" style={{ width: "auto", padding: "6px 14px" }} onClick={() => setShowBulkImportReferrals(true)}><Upload size={14} />Bulk import</button>
                 <button className="secondary" style={{ width: "auto", padding: "6px 14px" }} onClick={() => setShowImportHistory(true)}><History size={14} />Import history</button>
@@ -1780,13 +1796,21 @@ export default function AdminDashboard() {
                 <button className="secondary" style={{ width: "auto", padding: "6px 14px" }} onClick={() => exportReferrals("pdf")}><Download size={14} />PDF</button>
               </div>
             </div>
-            {referralTab === "CREDITED" && <AdmissionFilter value={dischargeStatus} onChange={setDischargeStatus} />}
+            {referralTab === "CREDITED" && !duplicatesOnly && <AdmissionFilter value={dischargeStatus} onChange={setDischargeStatus} />}
             {referralTotal > 0 && (
               <p style={{ fontSize: 13, color: "var(--ink-soft)", marginTop: -4 }}>
                 Showing {(referralPage - 1) * REFERRALS_PAGE_SIZE + 1}–{Math.min(referralPage * REFERRALS_PAGE_SIZE, referralTotal)} of {referralTotal}
               </p>
             )}
 
+            {duplicatesOnly ? (
+              <div style={{ background: "#fef2f2", border: "1px solid #fecaca", color: "#991b1b", borderRadius: 10, padding: "10px 14px", fontSize: 13.5, marginBottom: 14, lineHeight: 1.45 }}>
+                {referralTotal === 0
+                  ? "No duplicate file numbers — every file number is used by only one patient."
+                  : <><strong>{duplicateNumbers}</strong> file number{duplicateNumbers === 1 ? " is" : "s are"} used more than once, across <strong>{referralTotal}</strong> referrals — grouped by file number below. Use Edit on the wrong one to correct it. Other filters are ignored in this view.</>}
+              </div>
+            ) : (
+            <>
             <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginBottom: 14, alignItems: "flex-end" }}>
               <div style={{ flex: 1, minWidth: 200, maxWidth: 360 }}>
                 <label>Doctor</label>
@@ -1825,8 +1849,11 @@ export default function AdminDashboard() {
               <button style={{ width: 120 }} onClick={() => (referralPage === 1 ? loadReferrals() : setReferralPage(1))}><Search size={15} />Search</button>
             </div>
 
+            </>
+            )}
+
             {referrals.length === 0 ? (
-              <EmptyState icon={ClipboardList} title="No referrals found" subtitle="Try adjusting your filters or search" />
+              <EmptyState icon={ClipboardList} title={duplicatesOnly ? "No duplicate file numbers" : "No referrals found"} subtitle={duplicatesOnly ? "Every file number is used only once" : "Try adjusting your filters or search"} />
             ) : (
               <div className="table-wrap">
               <table className="referrals-table">
@@ -1837,16 +1864,28 @@ export default function AdminDashboard() {
                   </tr>
                 </thead>
                 <tbody>
-                  {referrals.map((r) => (
-                    <tr key={r.id} style={r.status === "CREDITED" && r.dischargedAt ? { background: "#fef3c7" } : undefined}>
+                  {referrals.map((r, i) => (
+                    <tr
+                      key={r.id}
+                      style={
+                        duplicatesOnly
+                          ? {
+                              background: "#fef2f2",
+                              // a red line above the first row of each file number, so each duplicate group reads as a unit
+                              ...(i > 0 && String(referrals[i - 1].fileNumber).toUpperCase() !== String(r.fileNumber).toUpperCase() ? { boxShadow: "inset 0 3px 0 #fca5a5" } : {}),
+                            }
+                          : r.status === "CREDITED" && r.dischargedAt ? { background: "#fef3c7" } : undefined
+                      }
+                    >
                       <td>
                         <div className="cell-primary">{r.patientName}{r.attachmentPath && <AttachmentIcon referralId={r.id} />}{r.extraAttachmentPath && <AttachmentIcon referralId={r.id} kind="extra" />}</div>
                         <div className="cell-secondary">
                           {r.patientAge ?? "—"}{r.patientGender ? `${r.patientGender.charAt(0)}` : ""}
                           {r.fileNumber ? ` · ${r.fileNumber}` : ""}
+                          {duplicatesOnly && <span className="chip pending" style={{ marginLeft: 6, background: "#fee2e2", color: "#991b1b" }}>Duplicate</span>}
                           {r.patientPhone ? ` · ${r.patientPhone}` : ""}
                         </div>
-                        {r.leadNote && <LeadNote text={r.leadNote} />}
+                        <LeadNote text={r.leadNote} messageCount={r._count?.messages || 0} canStart={Boolean(r.doctor?.marketingPerson)} onReply={() => setThreadFor(r)} />
                         <MissingDetails referral={r} />
                       </td>
                       <td>
@@ -2090,6 +2129,7 @@ export default function AdminDashboard() {
           onClose={() => setMarketingQr(null)}
         />
       )}
+      {threadFor && <ReferralThreadModal referral={threadFor} viewer="STAFF" onClose={() => setThreadFor(null)} onChanged={loadReferrals} />}
       {showAddPatient && (
         <AddPatientModal
           onClose={() => setShowAddPatient(false)}

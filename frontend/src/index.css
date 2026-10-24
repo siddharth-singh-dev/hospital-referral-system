@@ -367,3 +367,10 @@ tr:hover .row-hover-actions { opacity: 1; }
   font-weight: 700; font-size: 14px; white-space: nowrap; user-select: none;
 }
 .file-number-input.is-disabled { opacity: 0.6; }
+
+/* Small "Reply" / "Conversation (3)" link under a lead's note */
+button.thread-link {
+  width: auto; padding: 2px 6px; margin-top: 3px; background: transparent; color: var(--teal-600);
+  border: none; border-radius: 6px; font-size: 11.5px; font-weight: 600; gap: 4px;
+}
+button.thread-link:hover { background: var(--teal-50); filter: none; }

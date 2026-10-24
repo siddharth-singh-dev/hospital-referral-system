@@ -10,6 +10,7 @@ import EditReferralModal from "../components/EditReferralModal";
 import DateRangePicker from "../components/DateRangePicker";
 import AttachmentIcon from "../components/AttachmentIcon";
 import LeadNote from "../components/LeadNote";
+import ReferralThreadModal from "../components/ReferralThreadModal";
 import MissingDetails from "../components/MissingDetails";
 import AdmissionFilter from "../components/AdmissionFilter";
 import NotificationBell from "../components/NotificationBell";
@@ -36,6 +37,7 @@ export default function StaffPortal() {
   const canRedeem = permissions.includes("REDEEM_CREDITS");
 
   const [referrals, setReferrals] = useState([]);
+  const [threadFor, setThreadFor] = useState(null); // referral whose note conversation is open
   const [doctors, setDoctors] = useState([]);
   const [tab, setTab] = useState("PENDING");
   const [search, setSearch] = useState("");
@@ -374,7 +376,7 @@ export default function StaffPortal() {
                 <tbody>
                   {referrals.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE).map((r) => (
                     <tr key={r.id} style={r.status === "CREDITED" && r.dischargedAt ? { background: "#fef3c7" } : undefined}>
-                      <td>{r.patientName}{r.attachmentPath && <AttachmentIcon referralId={r.id} />}{r.extraAttachmentPath && <AttachmentIcon referralId={r.id} kind="extra" />}{r.leadNote && <LeadNote text={r.leadNote} />}<MissingDetails referral={r} /></td>
+                      <td>{r.patientName}{r.attachmentPath && <AttachmentIcon referralId={r.id} />}{r.extraAttachmentPath && <AttachmentIcon referralId={r.id} kind="extra" />}<LeadNote text={r.leadNote} messageCount={r._count?.messages || 0} onReply={() => setThreadFor(r)} /><MissingDetails referral={r} /></td>
                       <td>{r.fileNumber || "—"}</td>
                       <td>{r.patientAge ?? "—"}</td>
                       <td>{r.patientGender ? r.patientGender.charAt(0) + r.patientGender.slice(1).toLowerCase() : "—"}</td>
@@ -498,6 +500,7 @@ export default function StaffPortal() {
           onConvert={handleConvertToIpd}
         />
       )}
+      {threadFor && <ReferralThreadModal referral={threadFor} viewer="STAFF" onClose={() => setThreadFor(null)} onChanged={load} />}
       {editReferralModal && (
         <EditReferralModal
           referral={editReferralModal}

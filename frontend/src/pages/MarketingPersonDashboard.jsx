@@ -7,6 +7,7 @@ import Modal from "../components/Modal";
 import CardScanUpload, { CARD_TYPES } from "../components/CardScanUpload";
 import ExtraAttachmentPicker from "../components/ExtraAttachmentPicker";
 import LeadUpdateModal from "../components/LeadUpdateModal";
+import ReferralThreadModal from "../components/ReferralThreadModal";
 import { pairError, panelOptionsForCard, cardOptionsForPanel } from "../utils/cardPanelRules";
 import { PANEL_OPTIONS } from "../utils/panels";
 
@@ -87,6 +88,8 @@ export default function MarketingPersonDashboard() {
   // The card block opens on demand, and stays open once anything is in it (including a card type the Panel just locked in).
   const cardOpen = showCardSection || Boolean(attachmentCardType || idNumber || attachmentFile);
   const selectedLead = myLeads.find((l) => l.id === selectedLeadId); // re-read from the list so it refreshes after an update
+  const [threadLeadId, setThreadLeadId] = useState(null); // lead whose conversation with reception is open
+  const threadLead = myLeads.find((l) => l.id === threadLeadId);
 
   function handleCardTypeChange(c) {
     setAttachmentCardType(c);
@@ -486,9 +489,25 @@ export default function MarketingPersonDashboard() {
                           <span className="badge" style={{ background: meta.bg, color: meta.color, fontSize: 11.5, padding: "2px 9px" }}>{l.label}</span>
                           {l.note && <div style={{ color: "var(--ink-soft)", fontSize: 11.5, marginTop: 2, wordBreak: "break-word" }}>{l.note}</div>}
                         </div>
-                        <span style={{ color: "var(--ink-soft)", fontSize: 12, textAlign: "right" }}>
-                          {new Date(l.submittedAt).toLocaleDateString("en-IN", { day: "2-digit", month: "short" })}
-                        </span>
+                        <div style={{ textAlign: "right" }}>
+                          <span style={{ color: "var(--ink-soft)", fontSize: 12 }}>
+                            {new Date(l.submittedAt).toLocaleDateString("en-IN", { day: "2-digit", month: "short" })}
+                          </span>
+                          {l.messageCount > 0 && (
+                            // opens the conversation with reception; the red count is replies not opened yet
+                            <button
+                              type="button"
+                              className="thread-link"
+                              style={{ display: "flex", marginLeft: "auto" }}
+                              onClick={(e) => { e.stopPropagation(); setThreadLeadId(l.id); }}
+                            >
+                              Replies ({l.messageCount})
+                              {l.unreadReplyCount > 0 && (
+                                <span style={{ background: "#dc2626", color: "#fff", borderRadius: 999, padding: "0 6px", fontSize: 10.5, fontWeight: 700 }}>{l.unreadReplyCount} new</span>
+                              )}
+                            </button>
+                          )}
+                        </div>
                       </div>
                     );
                   })}
@@ -543,6 +562,16 @@ export default function MarketingPersonDashboard() {
 
       {selectedLead && (
         <LeadUpdateModal lead={selectedLead} token={token} onClose={() => setSelectedLeadId(null)} onUpdated={() => loadMyLeads(token)} />
+      )}
+
+      {threadLead && (
+        <ReferralThreadModal
+          referral={{ id: threadLead.id, patientName: threadLead.patientName }}
+          viewer="MARKETING"
+          token={token}
+          onClose={() => { setThreadLeadId(null); loadMyLeads(token); }} // reopening the list clears the "new" count the thread just marked as read
+          onChanged={() => loadMyLeads(token)}
+        />
       )}
 
       {showLeadersModal && (

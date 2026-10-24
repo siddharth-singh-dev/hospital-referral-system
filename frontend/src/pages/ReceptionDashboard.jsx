@@ -10,6 +10,7 @@ import AddPatientModal from "../components/AddPatientModal";
 import EditReferralModal from "../components/EditReferralModal";
 import AttachmentIcon from "../components/AttachmentIcon";
 import LeadNote from "../components/LeadNote";
+import ReferralThreadModal from "../components/ReferralThreadModal";
 import MissingDetails from "../components/MissingDetails";
 import NotificationBell from "../components/NotificationBell";
 import EmptyState from "../components/EmptyState";
@@ -40,6 +41,7 @@ export default function ReceptionDashboard() {
   const [confirmModal, setConfirmModal] = useState(null);
   const [convertModal, setConvertModal] = useState(null);
   const [showAddPatient, setShowAddPatient] = useState(false);
+  const [threadFor, setThreadFor] = useState(null); // referral whose note conversation is open
   const [editReferralModal, setEditReferralModal] = useState(null);
   const [statusCounts, setStatusCounts] = useState({});
   const [creditedFilter, setCreditedFilter] = useState(""); // "", "ADMITTED", "DISCHARGED" — only relevant while viewing the Credited tab
@@ -299,7 +301,7 @@ export default function ReceptionDashboard() {
                         {r.fileNumber ? ` · ${r.fileNumber}` : ""}
                         {r.patientPhone ? ` · ${r.patientPhone}` : ""}
                       </div>
-                      {r.leadNote && <LeadNote text={r.leadNote} />}
+                      <LeadNote text={r.leadNote} messageCount={r._count?.messages || 0} canStart={Boolean(r.doctor?.marketingPerson)} onReply={() => setThreadFor(r)} />
                         <MissingDetails referral={r} />
                     </td>
                     <td>
@@ -423,6 +425,7 @@ export default function ReceptionDashboard() {
           onConvert={handleConvertToIpd}
         />
       )}
+      {threadFor && <ReferralThreadModal referral={threadFor} viewer="STAFF" onClose={() => setThreadFor(null)} onChanged={load} />}
       {showAddPatient && (
         <AddPatientModal
           onClose={() => setShowAddPatient(false)}
