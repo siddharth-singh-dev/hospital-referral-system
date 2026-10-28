@@ -1,5 +1,7 @@
+// The calendar date as read in India — toISOString() would give the UTC date, which is still
+// "yesterday" between midnight and 5:30 am IST, so "Today" would pick the wrong day then.
 function toDateInputValue(d) {
-  return d.toISOString().slice(0, 10);
+  return new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata", year: "numeric", month: "2-digit", day: "2-digit" }).format(d);
 }
 
 // Controlled: { from, to } are "YYYY-MM-DD" strings or "". Quick-select buttons just

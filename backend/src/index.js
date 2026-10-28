@@ -6,6 +6,7 @@ import authRoutes from "./routes/auth.js";
 import doctorRoutes from "./routes/doctors.js";
 import referralRoutes from "./routes/referrals.js";
 import referralMessageRoutes from "./routes/referralMessages.js";
+import reportRoutes from "./routes/reports.js";
 import staffRoutes from "./routes/staff.js";
 import hospitalRoutes from "./routes/hospitals.js";
 import dashboardRoutes from "./routes/dashboard.js";
@@ -50,6 +51,7 @@ app.use("/api/auth", authRoutes);
 app.use("/api/doctors", doctorRoutes);
 app.use("/api/referrals", referralRoutes);
 app.use("/api/referrals", referralMessageRoutes); // /:id/messages — the note thread on a lead
+app.use("/api/reports", reportRoutes); // admin Reports section
 app.use("/api/staff", staffRoutes);
 app.use("/api/hospitals", hospitalRoutes);
 app.use("/api/dashboard", dashboardRoutes);

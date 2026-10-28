@@ -4,7 +4,7 @@ import {
   LayoutDashboard, Stethoscope, Users, ClipboardList, Plus, Power,
   Wallet, Trash2, KeyRound, Download, Search, CheckCircle2,
   XCircle, MapPin, X, ChevronUp, ChevronDown, ChevronLeft, ChevronRight,
-  Eye, TrendingUp, IndianRupee, UserCheck, Clock, Award, ArrowUpCircle, RotateCcw, Upload, LogOut, UserPlus, Pencil, Megaphone, QrCode, History, IdCard, Copy,
+  Eye, TrendingUp, IndianRupee, UserCheck, Clock, Award, ArrowUpCircle, RotateCcw, Upload, LogOut, UserPlus, Pencil, Megaphone, QrCode, History, IdCard, Copy, BarChart3,
 } from "lucide-react";
 import { ResponsiveContainer, AreaChart, Area, XAxis, YAxis, Tooltip, CartesianGrid, BarChart, Bar, Cell, PieChart, Pie, Legend } from "recharts";
 import api from "../api/client";
@@ -39,6 +39,7 @@ import MarketingPersonModal from "../components/MarketingPersonModal";
 import MarketingPersonDetailModal from "../components/MarketingPersonDetailModal";
 import MarketingPersonQrModal from "../components/MarketingPersonQrModal";
 import ActivityLogPanel from "../components/ActivityLogPanel";
+import ReportsPanel from "../components/ReportsPanel";
 import LeaderComparisonPanel from "../components/LeaderComparisonPanel";
 import NewLeadersDetail from "../components/NewLeadersDetail";
 
@@ -49,6 +50,7 @@ const NAV_ITEMS = [
   { key: "Staff", label: "Staff", icon: Users },
   { key: "All Referrals", label: "All Referrals", icon: ClipboardList },
   { key: "Activity Log", label: "Activity Log", icon: History },
+  { key: "Reports", label: "Reports", icon: BarChart3 },
 ];
 
 const PERMISSION_LABELS = {
@@ -2001,6 +2003,7 @@ export default function AdminDashboard() {
         )}
 
         {activeTab === "Activity Log" && <ActivityLogPanel />}
+        {activeTab === "Reports" && <ReportsPanel />}
       </div>
 
       {qrModalDoctor && (
